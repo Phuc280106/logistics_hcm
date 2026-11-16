@@ -18,16 +18,25 @@ public class DonHangController {
     private final LichSuHanhTrinhRepository lichSuRepo;
     private final BangChungGiaoHangRepository podRepo;
     private final GiaoDichVietQrRepository qrRepo;
+    private final LichHenGiaoLaiRepository lichHenRepo;
+    private final ChiTietTieuTuyenRepository ctTieuTuyenRepo;
+    private final TieuTuyenRepository tieuTuyenRepo;
 
     public DonHangController(
             DonHangRepository donHangRepo,
             LichSuHanhTrinhRepository lichSuRepo,
             BangChungGiaoHangRepository podRepo,
-            GiaoDichVietQrRepository qrRepo) {
+            GiaoDichVietQrRepository qrRepo,
+            LichHenGiaoLaiRepository lichHenRepo,
+            ChiTietTieuTuyenRepository ctTieuTuyenRepo,
+            TieuTuyenRepository tieuTuyenRepo) {
         this.donHangRepo = donHangRepo;
         this.lichSuRepo = lichSuRepo;
         this.podRepo = podRepo;
         this.qrRepo = qrRepo;
+        this.lichHenRepo = lichHenRepo;
+        this.ctTieuTuyenRepo = ctTieuTuyenRepo;
+        this.tieuTuyenRepo = tieuTuyenRepo;
     }
 
     public record FeeCalcRequest(
@@ -58,7 +67,7 @@ public class DonHangController {
             Boolean taiQuay) {}
 
     public record PodRequest(String anhChupGoiHang, String toaDoGps, String tenNguoiKy, String maNhanVien) {}
-    public record FailDeliveryRequest(String lyDoThatBai, String maNhanVien) {}
+    public record FailDeliveryRequest(String lyDoThatBai, String ngayHenGiaoLai, String ghiChu, String maNhanVien) {}
 
     @GetMapping
     public List<DonHang> listAll(@RequestParam(required = false) String shipper,
@@ -77,7 +86,8 @@ public class DonHangController {
         return donHangRepo.findById(maVanDon)
                 .map(dh -> ResponseEntity.ok(Map.of(
                         "donHang", dh,
-                        "hanhTrinh", lichSuRepo.findByMaVanDonOrderByThoiGianAsc(maVanDon)
+                        "hanhTrinh", lichSuRepo.findByMaVanDonOrderByThoiGianAsc(maVanDon),
+                        "lichHenGiaoLai", lichHenRepo.findByMaVanDonOrderByLanGiaoThuAsc(maVanDon)
                 )))
                 .orElse(ResponseEntity.notFound().build());
     }
@@ -120,12 +130,21 @@ public class DonHangController {
                 req.maGoiDichVu(), req.trongLuongThuc(), req.chieuDai(), req.chieuRong(),
                 req.chieuCao(), req.laHangDeVo(), req.tienCod()));
 
+        // Tự động phân công Shipper theo tiểu tuyến (quận/huyện + phường/xã)
+        String assignedShipper = ctTieuTuyenRepo
+                .findFirstByQuanHuyenIgnoreCaseAndPhuongXaIgnoreCase(
+                        req.quanHuyenGiao() != null ? req.quanHuyenGiao() : "",
+                        req.phuongXaGiao() != null ? req.phuongXaGiao() : "")
+                .flatMap(ct -> tieuTuyenRepo.findById(ct.getMaTieuTuyen()))
+                .map(TieuTuyen::getMaShipper)
+                .orElse("NV_SHIP_01");
+
         DonHang dh = new DonHang();
         String code = "FP-" + (10000 + new Random().nextInt(89999));
         dh.setMaVanDon(code);
         dh.setMaKhachHang("ND_KH_01");
         dh.setMaBuuCucHienTai("BC_BENNGHE");
-        dh.setMaShipper("NV_SHIP_01");
+        dh.setMaShipper(assignedShipper);
         dh.setMaGoiDichVu(req.maGoiDichVu() != null ? req.maGoiDichVu() : "GDV_TIEUCHUAN");
         dh.setMaLoaiHang(Boolean.TRUE.equals(req.laHangDeVo()) ? "LHH_DEVO" : "LHH_THUONG");
         dh.setNguoiGuiSdt(req.nguoiGuiSdt());
@@ -153,8 +172,8 @@ public class DonHangController {
         donHangRepo.save(dh);
         addHistory(code, "BC_BENNGHE", "NV_QUAY_01", dh.getTrangThai(),
                 Boolean.TRUE.equals(req.taiQuay())
-                        ? "Tạo đơn tại quầy Bưu cục Bến Nghé"
-                        : "Khách hàng đặt đơn Online");
+                        ? "Tạo đơn tại quầy Bưu cục Bến Nghé (Gán tiểu tuyến: " + assignedShipper + ")"
+                        : "Khách hàng đặt đơn Online (Gán tiểu tuyến: " + assignedShipper + ")");
         return ResponseEntity.ok(dh);
     }
 
@@ -203,8 +222,38 @@ public class DonHangController {
             dh.setTrangThai(fails >= 3 ? "ChoChuyenHoan" : "ChoGiaoLai");
             donHangRepo.save(dh);
 
+            LichHenGiaoLai lh = new LichHenGiaoLai();
+            lh.setMaLichHen("LH-" + System.currentTimeMillis());
+            lh.setMaVanDon(maVanDon);
+            lh.setLanGiaoThu(fails);
+            lh.setLyDoThatBai(req.lyDoThatBai() != null ? req.lyDoThatBai() : "Khách không nghe máy");
+            if (req.ngayHenGiaoLai() != null && !req.ngayHenGiaoLai().isBlank()) {
+                try {
+                    lh.setNgayHenGiaoLai(LocalDateTime.parse(req.ngayHenGiaoLai()));
+                } catch (Exception ignored) {
+                    lh.setNgayHenGiaoLai(LocalDateTime.now().plusDays(1));
+                }
+            } else {
+                lh.setNgayHenGiaoLai(LocalDateTime.now().plusDays(1));
+            }
+            lh.setGhiChu(req.ghiChu());
+            lichHenRepo.save(lh);
+
             addHistory(maVanDon, dh.getMaBuuCucHienTai(), req.maNhanVien(), dh.getTrangThai(),
-                    "Giao thất bại lần " + fails + ": " + req.lyDoThatBai());
+                    "Giao thất bại lần " + fails + ": " + lh.getLyDoThatBai()
+                            + (fails >= 3 ? " (Chuyển sang Chờ chuyển hoàn)" : " (Đã tạo lịch hẹn giao lại)"));
+            return ResponseEntity.ok(dh);
+        }).orElse(ResponseEntity.notFound().build());
+    }
+
+    @PostMapping("/{maVanDon}/xac-nhan-hoan")
+    @Transactional
+    public ResponseEntity<?> confirmReturn(@PathVariable String maVanDon) {
+        return donHangRepo.findById(maVanDon).map(dh -> {
+            dh.setTrangThai("DaChuyenHoan");
+            donHangRepo.save(dh);
+            addHistory(maVanDon, dh.getMaBuuCucHienTai(), "NV_ADMIN_01", "DaChuyenHoan",
+                    "Đã hoàn trả đơn hàng về cho người gửi thành công");
             return ResponseEntity.ok(dh);
         }).orElse(ResponseEntity.notFound().build());
     }

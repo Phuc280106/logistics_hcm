@@ -15,19 +15,26 @@ public class ManifestController {
     private final ManifestRepository manifestRepo;
     private final ChiTietManifestRepository chiTietRepo;
     private final BienBanBatThuongRepository bienBanRepo;
+    private final DonHangRepository donHangRepo;
+    private final LichSuHanhTrinhRepository lichSuRepo;
 
     public ManifestController(
             ManifestRepository manifestRepo,
             ChiTietManifestRepository chiTietRepo,
-            BienBanBatThuongRepository bienBanRepo) {
+            BienBanBatThuongRepository bienBanRepo,
+            DonHangRepository donHangRepo,
+            LichSuHanhTrinhRepository lichSuRepo) {
         this.manifestRepo = manifestRepo;
         this.chiTietRepo = chiTietRepo;
         this.bienBanRepo = bienBanRepo;
+        this.donHangRepo = donHangRepo;
+        this.lichSuRepo = lichSuRepo;
     }
 
     public record CreateManifestRequest(String maBuuCucDi, String maBuuCucDen, String maNhanVienLap) {}
     public record ScanRequest(String maVanDon) {}
-    public record IncidentRequest(String maVanDon, String loaiBatThuong, String moTa, String maNhanVienKho) {}
+    public record IncidentRequest(String maVanDon, String loaiBatThuong, Double canNangThucTe, String moTa, String maNhanVienKho) {}
+    public record ApproveIncidentRequest(String maQuanLyDuyet, String phuongAnXuLy) {}
 
     @GetMapping
     public List<Manifest> listAll() {
@@ -69,6 +76,11 @@ public class ManifestController {
             ct.setMaVanDon(req.maVanDon());
             ct.setDaQuetNhap(false);
             chiTietRepo.save(ct);
+
+            donHangRepo.findById(req.maVanDon()).ifPresent(dh -> {
+                dh.setTrangThai("ChoLuanChuyenHub");
+                donHangRepo.save(dh);
+            });
 
             m.setTongSoKien(chiTietRepo.findByMaManifest(maManifest).size());
             manifestRepo.save(m);
@@ -115,6 +127,40 @@ public class ManifestController {
         }).orElse(ResponseEntity.notFound().build());
     }
 
+    @PostMapping("/{maManifest}/kiem-nhan-hoan-tat")
+    @Transactional
+    public ResponseEntity<?> completeReceiving(@PathVariable String maManifest) {
+        return manifestRepo.findById(maManifest).map(m -> {
+            List<ChiTietManifest> items = chiTietRepo.findByMaManifest(maManifest);
+            List<ChiTietManifest> missing = items.stream().filter(i -> !Boolean.TRUE.equals(i.getDaQuetNhap())).toList();
+
+            if (missing.isEmpty()) {
+                m.setTrangThai("HoanTatNhapKho");
+                for (ChiTietManifest item : items) {
+                    donHangRepo.findById(item.getMaVanDon()).ifPresent(dh -> {
+                        dh.setMaBuuCucHienTai(m.getMaBuuCucDen());
+                        dh.setTrangThai("DaNhapKho");
+                        donHangRepo.save(dh);
+                    });
+                }
+            } else {
+                m.setTrangThai("PhatSinhBatThuong");
+                for (ChiTietManifest miss : missing) {
+                    BienBanBatThuong bb = new BienBanBatThuong();
+                    bb.setMaBienBan("BB-" + System.currentTimeMillis() + "-" + miss.getMaVanDon());
+                    bb.setMaVanDon(miss.getMaVanDon());
+                    bb.setMaNhanVienKhoLap(m.getMaNhanVienLap());
+                    bb.setLoaiBatThuong("ThieuKienManifest");
+                    bb.setHinhAnhBangChung("missing-manifest.jpg");
+                    bb.setMoTa("Thiếu kiện khi kiểm nhận Manifest " + maManifest + " tại kho đích " + m.getMaBuuCucDen());
+                    bb.setTrangThaiDuyet("ChoXuLy");
+                    bienBanRepo.save(bb);
+                }
+            }
+            return ResponseEntity.ok(manifestRepo.save(m));
+        }).orElse(ResponseEntity.notFound().build());
+    }
+
     @PostMapping("/bien-ban-bat-thuong")
     @Transactional
     public BienBanBatThuong createIncident(@RequestBody IncidentRequest req) {
@@ -123,10 +169,48 @@ public class ManifestController {
         bb.setMaVanDon(req.maVanDon());
         bb.setMaNhanVienKhoLap(req.maNhanVienKho() != null ? req.maNhanVienKho() : "NV_ADMIN_01");
         bb.setLoaiBatThuong(req.loaiBatThuong() != null ? req.loaiBatThuong() : "RachVo");
+        bb.setCanNangThucTe(req.canNangThucTe());
         bb.setHinhAnhBangChung("incident-demo.jpg");
         bb.setMoTa(req.moTa());
         bb.setTrangThaiDuyet("ChoXuLy");
+
+        donHangRepo.findById(req.maVanDon()).ifPresent(dh -> {
+            dh.setTrangThai("TamGiuChoXuLy");
+            donHangRepo.save(dh);
+        });
+
         return bienBanRepo.save(bb);
+    }
+
+    @PostMapping("/bien-ban-bat-thuong/{maBienBan}/duyet")
+    @Transactional
+    public ResponseEntity<?> approveIncident(@PathVariable String maBienBan, @RequestBody ApproveIncidentRequest req) {
+        return bienBanRepo.findById(maBienBan).map(bb -> {
+            bb.setMaQuanLyDuyet(req.maQuanLyDuyet() != null ? req.maQuanLyDuyet() : "NV_ADMIN_01");
+            bb.setPhuongAnXuLy(req.phuongAnXuLy());
+            bb.setTrangThaiDuyet("DaDuyet");
+            bienBanRepo.save(bb);
+
+            donHangRepo.findById(bb.getMaVanDon()).ifPresent(dh -> {
+                if ("BoiThuong".equalsIgnoreCase(req.phuongAnXuLy())) {
+                    dh.setTrangThai("DaBoiThuong");
+                } else {
+                    dh.setTrangThai("DaNhapKho");
+                }
+                donHangRepo.save(dh);
+
+                LichSuHanhTrinh ls = new LichSuHanhTrinh();
+                ls.setMaHanhTrinh("HT-" + UUID.randomUUID().toString().substring(0, 8));
+                ls.setMaVanDon(dh.getMaVanDon());
+                ls.setMaBuuCuc(dh.getMaBuuCucHienTai());
+                ls.setMaNhanVienThucHien(bb.getMaQuanLyDuyet());
+                ls.setTrangThaiGhiNhan(dh.getTrangThai());
+                ls.setMoTaChiTiet("Đã duyệt biên bản bất thường " + maBienBan + " - Phương án: " + req.phuongAnXuLy());
+                lichSuRepo.save(ls);
+            });
+
+            return ResponseEntity.ok(bb);
+        }).orElse(ResponseEntity.notFound().build());
     }
 
     @GetMapping("/bien-ban-bat-thuong")
