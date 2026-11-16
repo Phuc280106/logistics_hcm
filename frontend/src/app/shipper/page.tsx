@@ -126,10 +126,26 @@ export default function ShipperPage() {
     }
   }
 
+  async function handleConfirmPickup(maVanDon: string) {
+    setErrorMsg("");
+    try {
+      await apiFetch(`/don-hang/${maVanDon}/lay-hang`, {
+        method: "POST",
+        body: JSON.stringify({ maNhanVien: user?.maNhanVien || "NV_SHIP_01" }),
+      });
+      setOrders((prev) =>
+        prev.map((o) => (o.maVanDon === maVanDon ? { ...o, trangThai: "DaLayHang" } : o))
+      );
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Lỗi xác nhận lấy hàng");
+    }
+  }
+
   const pendingPhieuXuat = phieuXuatList.filter((p) => !p.shipperDaXacNhan);
   const activeDeliver = orders.filter((o) => o.trangThai === "DangGiaoHang" || o.trangThai === "SanSangGiao");
-  const doneOrders = orders.filter((o) => o.trangThai === "DaGiaoThanhCong" || o.trangThai === "ChoGiaoLai" || o.trangThai === "ChoChuyenHoan");
-  const listToShow = tab === "deliver" ? activeDeliver : tab === "done" ? doneOrders : [];
+  const pickupOrders = orders.filter((o) => o.trangThai === "ChoPhanCongLay");
+  const doneOrders = orders.filter((o) => o.trangThai === "DaGiaoThanhCong" || o.trangThai === "ChoGiaoLai" || o.trangThai === "ChoChuyenHoan" || o.trangThai === "DaLayHang");
+  const listToShow = tab === "deliver" ? activeDeliver : tab === "pickup" ? pickupOrders : doneOrders;
   const pct = Math.min(100, Math.round((codWallet / 3000000) * 100));
 
   return (
@@ -241,7 +257,7 @@ export default function ShipperPage() {
               onClick={() => setTab("pickup")}
               className={`py-2 rounded-lg transition ${tab === "pickup" ? "bg-[#FF5722] text-white shadow-sm" : "text-slate-600"}`}
             >
-              Cần lấy (0)
+              Cần lấy ({pickupOrders.length})
             </button>
             <button
               onClick={() => setTab("done")}
@@ -292,6 +308,13 @@ export default function ShipperPage() {
                         className="px-4 py-2 bg-[#FF5722] hover:bg-[#E64A19] text-white text-xs font-semibold rounded-xl transition"
                       >
                         Bắt đầu giao →
+                      </button>
+                    ) : tab === "pickup" ? (
+                      <button
+                        onClick={() => handleConfirmPickup(o.maVanDon)}
+                        className="px-4 py-2 bg-[#0F172A] hover:bg-slate-800 text-white text-xs font-semibold rounded-xl transition"
+                      >
+                        Xác nhận đã lấy hàng
                       </button>
                     ) : (
                       <span className="px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 text-xs font-semibold">

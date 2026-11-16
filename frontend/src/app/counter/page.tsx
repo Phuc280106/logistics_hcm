@@ -92,21 +92,39 @@ export default function CounterPage() {
   }, [router]);
 
   useEffect(() => {
-    const vol = (d * r * c) / 6000;
-    const cw = Math.max(weight || 0, vol);
-    const hoaToc = service === "GDV_HOATOC";
-    const cuocSan = hoaToc ? 35000 : 20000;
-    const vuot = Math.max(0, cw - 1) * (hoaToc ? 15000 : 10000);
-    const phuPhi = fragile ? 3000 : 0;
-    const phiCod = Math.round((cod || 0) * 0.01);
-    setFee({
-      trongLuongTinhCuoc: Math.round(cw * 100) / 100,
-      cuocSan,
-      cuocVuotCan: Math.round(vuot),
-      phuPhi,
-      phiCod,
-      tongCuoc: cuocSan + Math.round(vuot) + phuPhi + phiCod,
-    });
+    const timer = setTimeout(() => {
+      apiFetch<typeof fee>("/don-hang/tinh-cuoc", {
+        method: "POST",
+        body: JSON.stringify({
+          maGoiDichVu: service,
+          trongLuongThuc: weight || 0,
+          chieuDai: d || 0,
+          chieuRong: r || 0,
+          chieuCao: c || 0,
+          laHangDeVo: fragile,
+          tienCod: cod || 0,
+        }),
+      })
+        .then((res) => setFee(res))
+        .catch(() => {
+          const vol = (d * r * c) / 6000;
+          const cw = Math.max(weight || 0, vol);
+          const hoaToc = service === "GDV_HOATOC";
+          const cuocSan = hoaToc ? 35000 : 20000;
+          const vuot = Math.max(0, cw - 1) * (hoaToc ? 15000 : 10000);
+          const phuPhi = fragile ? 3000 : 0;
+          const phiCod = Math.round((cod || 0) * 0.01);
+          setFee({
+            trongLuongTinhCuoc: Math.round(cw * 100) / 100,
+            cuocSan,
+            cuocVuotCan: Math.round(vuot),
+            phuPhi,
+            phiCod,
+            tongCuoc: cuocSan + Math.round(vuot) + phuPhi + phiCod,
+          });
+        });
+    }, 200);
+    return () => clearTimeout(timer);
   }, [weight, d, r, c, fragile, cod, service]);
 
   function handleDistrictChange(newDistrict: string) {

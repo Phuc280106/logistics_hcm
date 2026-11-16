@@ -233,10 +233,32 @@ export default function CustomerPage() {
     }
   }
 
-  const baseFee = service === "GDV_HOATOC" ? 35000 : 20000;
-  const weightFee = Math.max(0, (weight || 0) - 1) * (service === "GDV_HOATOC" ? 15000 : 10000);
-  const codFee = Math.round((cod || 0) * 0.01);
-  const estTotal = baseFee + weightFee + codFee;
+  const [estTotal, setEstTotal] = useState<number>(20000);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      apiFetch<{ tongCuoc: number }>("/don-hang/tinh-cuoc", {
+        method: "POST",
+        body: JSON.stringify({
+          maGoiDichVu: service,
+          trongLuongThuc: weight || 0.5,
+          chieuDai: 20,
+          chieuRong: 15,
+          chieuCao: 10,
+          laHangDeVo: false,
+          tienCod: cod || 0,
+        }),
+      })
+        .then((res) => setEstTotal(Number(res.tongCuoc || 0)))
+        .catch(() => {
+          const baseFee = service === "GDV_HOATOC" ? 35000 : 20000;
+          const weightFee = Math.max(0, (weight || 0) - 1) * (service === "GDV_HOATOC" ? 15000 : 10000);
+          const codFee = Math.round((cod || 0) * 0.01);
+          setEstTotal(baseFee + weightFee + codFee);
+        });
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [service, weight, cod]);
   const wards = HCM_DISTRICTS[district] || [];
 
   return (
