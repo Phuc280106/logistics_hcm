@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Zap, MapPin, Phone, CheckCircle2, XCircle, Package, Wallet, User, LogOut, Navigation, ClipboardCheck } from "lucide-react";
+import { Zap, MapPin, Phone, CheckCircle2, XCircle, Package, Wallet, User, LogOut, Navigation, ClipboardCheck, AlertCircle } from "lucide-react";
 import { apiFetch, formatVnd, UserSession } from "@/lib/api";
 
 interface DonHangItem {
@@ -25,49 +25,21 @@ interface PhieuXuatItem {
   shipperDaXacNhan: boolean;
 }
 
-const DEMO_ORDERS: DonHangItem[] = [
-  {
-    maVanDon: "FP-98231",
-    nguoiNhanTen: "Trần Thị Mai",
-    nguoiNhanSdt: "0912345678",
-    diaChiGiaoChiTiet: "45 Lê Duẩn",
-    phuongXaGiao: "P. Bến Nghé",
-    quanHuyenGiao: "Quận 1",
-    maGoiDichVu: "GDV_HOATOC",
-    tienCod: 450000,
-    trangThai: "DangGiaoHang",
-    soLanGiaoThatBai: 0,
-  },
-  {
-    maVanDon: "FP-98232",
-    nguoiNhanTen: "Lê Hoàng Phúc",
-    nguoiNhanSdt: "0903456789",
-    diaChiGiaoChiTiet: "78 Hai Bà Trưng",
-    phuongXaGiao: "P. Đa Kao",
-    quanHuyenGiao: "Quận 1",
-    maGoiDichVu: "GDV_TIEUCHUAN",
-    tienCod: 0,
-    trangThai: "SanSangGiao",
-    soLanGiaoThatBai: 0,
-  },
-];
-
 export default function ShipperPage() {
   const router = useRouter();
   const [user, setUser] = useState<UserSession | null>(null);
-  const [orders, setOrders] = useState<DonHangItem[]>(DEMO_ORDERS);
-  const [phieuXuatList, setPhieuXuatList] = useState<PhieuXuatItem[]>([
-    { maPhieuXuat: "PXK-10234", tongSoDon: 2, tongTienCodPhaiThu: 450000, shipperDaXacNhan: false },
-  ]);
+  const [orders, setOrders] = useState<DonHangItem[]>([]);
+  const [phieuXuatList, setPhieuXuatList] = useState<PhieuXuatItem[]>([]);
   const [tab, setTab] = useState<"deliver" | "pickup" | "done">("deliver");
   const [online, setOnline] = useState(true);
   const [selected, setSelected] = useState<DonHangItem | null>(null);
   const [modalMode, setModalMode] = useState<"detail" | "pod" | "fail" | null>(null);
   const [receiverName, setReceiverName] = useState("");
   const [failReason, setFailReason] = useState("Khách không nghe máy");
-  const [rescheduleDate, setRescheduleDate] = useState("2026-11-17T09:00");
-  const [failNote, setFailNote] = useState("Khách hẹn sáng mai giao lại tại cổng sau");
-  const [codWallet, setCodWallet] = useState(1250000);
+  const [rescheduleDate, setRescheduleDate] = useState("");
+  const [failNote, setFailNote] = useState("");
+  const [codWallet, setCodWallet] = useState(0);
+  const [errorMsg, setErrorMsg] = useState("");
 
   useEffect(() => {
     const raw = localStorage.getItem("fastpost_user");
@@ -80,32 +52,36 @@ export default function ShipperPage() {
     const shipperId = parsed.maNhanVien || "NV_SHIP_01";
 
     apiFetch<DonHangItem[]>(`/don-hang?shipper=${shipperId}`)
-      .then((data) => { if (data.length > 0) setOrders(data); })
-      .catch(() => {});
+      .then((data) => setOrders(data))
+      .catch(() => setErrorMsg("Chưa kết nối được Backend để tải danh sách đơn."));
 
     apiFetch<PhieuXuatItem[]>(`/kho/phieu-xuat?maShipper=${shipperId}`)
-      .then((px) => { if (px.length > 0) setPhieuXuatList(px); })
+      .then((px) => setPhieuXuatList(px))
       .catch(() => {});
 
     apiFetch<{ tongNoLuyKe: number }>(`/doi-soat/vi-cong-no/${shipperId}`)
-      .then((vi) => setCodWallet(Number(vi.tongNoLuyKe)))
+      .then((vi) => setCodWallet(Number(vi.tongNoLuyKe || 0)))
       .catch(() => {});
   }, [router]);
 
   async function handleConfirmPhieuXuat(maPhieuXuat: string) {
+    setErrorMsg("");
     try {
       await apiFetch(`/kho/phieu-xuat/${maPhieuXuat}/xac-nhan`, { method: "POST" });
-    } catch {}
-    setPhieuXuatList((prev) =>
-      prev.map((p) => (p.maPhieuXuat === maPhieuXuat ? { ...p, shipperDaXacNhan: true } : p))
-    );
-    setOrders((prev) =>
-      prev.map((o) => (o.trangThai === "SanSangGiao" ? { ...o, trangThai: "DangGiaoHang" } : o))
-    );
+      setPhieuXuatList((prev) =>
+        prev.map((p) => (p.maPhieuXuat === maPhieuXuat ? { ...p, shipperDaXacNhan: true } : p))
+      );
+      setOrders((prev) =>
+        prev.map((o) => (o.trangThai === "SanSangGiao" ? { ...o, trangThai: "DangGiaoHang" } : o))
+      );
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Lỗi xác nhận phiếu xuất kho");
+    }
   }
 
   async function handleConfirmPod() {
     if (!selected) return;
+    setErrorMsg("");
     try {
       await apiFetch(`/don-hang/${selected.maVanDon}/giao-thanh-cong`, {
         method: "POST",
@@ -116,19 +92,22 @@ export default function ShipperPage() {
           maNhanVien: user?.maNhanVien || "NV_SHIP_01",
         }),
       });
-    } catch {}
-    setOrders((prev) =>
-      prev.map((o) => (o.maVanDon === selected.maVanDon ? { ...o, trangThai: "DaGiaoThanhCong" } : o))
-    );
-    setCodWallet((w) => w + Number(selected.tienCod || 0));
-    setModalMode(null);
-    setSelected(null);
+      setOrders((prev) =>
+        prev.map((o) => (o.maVanDon === selected.maVanDon ? { ...o, trangThai: "DaGiaoThanhCong" } : o))
+      );
+      setCodWallet((w) => w + Number(selected.tienCod || 0));
+      setModalMode(null);
+      setSelected(null);
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Lỗi xác nhận giao hàng");
+    }
   }
 
   async function handleReportFail() {
     if (!selected) return;
+    setErrorMsg("");
     try {
-      await apiFetch(`/don-hang/${selected.maVanDon}/giao-that-bai`, {
+      const updated = await apiFetch<DonHangItem>(`/don-hang/${selected.maVanDon}/giao-that-bai`, {
         method: "POST",
         body: JSON.stringify({
           lyDoThatBai: failReason,
@@ -137,14 +116,14 @@ export default function ShipperPage() {
           maNhanVien: user?.maNhanVien || "NV_SHIP_01",
         }),
       });
-    } catch {}
-    const nextFails = (selected.soLanGiaoThatBai || 0) + 1;
-    const nextState = nextFails >= 3 ? "ChoChuyenHoan" : "ChoGiaoLai";
-    setOrders((prev) =>
-      prev.map((o) => (o.maVanDon === selected.maVanDon ? { ...o, trangThai: nextState, soLanGiaoThatBai: nextFails } : o))
-    );
-    setModalMode(null);
-    setSelected(null);
+      setOrders((prev) =>
+        prev.map((o) => (o.maVanDon === selected.maVanDon ? updated : o))
+      );
+      setModalMode(null);
+      setSelected(null);
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Lỗi báo giao thất bại");
+    }
   }
 
   const pendingPhieuXuat = phieuXuatList.filter((p) => !p.shipperDaXacNhan);
@@ -166,7 +145,7 @@ export default function ShipperPage() {
               <span className="font-bold text-lg text-[#0F172A]">FastPost Driver</span>
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-sm font-medium text-slate-700">{user?.hoTen || "Phương Duy"}</span>
+              <span className="text-sm font-medium text-slate-700">{user?.hoTen || "Shipper"}</span>
               <button
                 onClick={() => { localStorage.removeItem("fastpost_user"); router.push("/"); }}
                 className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50"
@@ -193,6 +172,12 @@ export default function ShipperPage() {
         </header>
 
         <main className="flex-1 p-4 space-y-4 overflow-y-auto pb-24">
+          {errorMsg && (
+            <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" /> {errorMsg}
+            </div>
+          )}
+
           {/* Pending Dispatch Handover Banner */}
           {pendingPhieuXuat.map((px) => (
             <div key={px.maPhieuXuat} className="bg-orange-50 border border-[#FF5722]/40 rounded-2xl p-3.5 flex items-center justify-between">
@@ -214,7 +199,7 @@ export default function ShipperPage() {
           {/* Dark Navy Summary Card */}
           <div className="bg-gradient-to-br from-[#0F172A] to-[#1E293B] text-white rounded-2xl p-4 shadow-md">
             <div className="text-sm font-semibold text-slate-200 mb-3">
-              Ca phát hôm nay - Đội xe Quận 1
+              Ca phát hôm nay · {user?.maBuuCuc || "TP.HCM"}
             </div>
             <div className="flex items-center gap-6 mb-4">
               <div className="flex items-baseline gap-2">
@@ -223,8 +208,8 @@ export default function ShipperPage() {
               </div>
               <div className="h-8 w-px bg-slate-700" />
               <div className="flex items-baseline gap-2">
-                <span className="text-3xl font-bold">0</span>
-                <span className="text-xs text-slate-300">Đơn cần lấy</span>
+                <span className="text-3xl font-bold">{doneOrders.length}</span>
+                <span className="text-xs text-slate-300">Đã xử lý</span>
               </div>
             </div>
             <div className="flex items-center justify-between text-xs mb-1.5">
@@ -268,49 +253,55 @@ export default function ShipperPage() {
 
           {/* Order Cards */}
           <div className="space-y-3">
-            {listToShow.map((o) => (
-              <div key={o.maVanDon} className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
-                <div className="mb-2">
-                  {o.maGoiDichVu === "GDV_HOATOC" ? (
-                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-orange-50 text-[#FF5722] text-xs font-semibold">
-                      <Zap className="w-3.5 h-3.5 fill-current" /> FastPost Hỏa Tốc
-                    </span>
-                  ) : (
-                    <span className="inline-block px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700 text-xs font-semibold">
-                      FastPost Tiêu Chuẩn
-                    </span>
-                  )}
-                </div>
-                <div className="text-xs text-slate-400 font-mono mb-0.5">#{o.maVanDon}</div>
-                <div className="flex items-center justify-between mb-1">
-                  <h3 className="font-bold text-base text-[#0F172A]">{o.nguoiNhanTen}</h3>
-                  <span className="text-xs text-slate-500">{o.nguoiNhanSdt}</span>
-                </div>
-                <p className="text-xs text-slate-600 flex items-start gap-1.5 mb-3">
-                  <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
-                  {o.diaChiGiaoChiTiet}, {o.phuongXaGiao}, {o.quanHuyenGiao}
-                </p>
-
-                <div className="flex items-center justify-between pt-2 border-t border-slate-100">
-                  <div>
-                    <div className="text-[11px] text-slate-400">Tiền thu hộ</div>
-                    <div className="font-bold text-base text-[#0F172A]">{formatVnd(o.tienCod)}</div>
-                  </div>
-                  {tab === "deliver" ? (
-                    <button
-                      onClick={() => { setSelected(o); setModalMode("detail"); setReceiverName(o.nguoiNhanTen); }}
-                      className="px-4 py-2 bg-[#FF5722] hover:bg-[#E64A19] text-white text-xs font-semibold rounded-xl transition"
-                    >
-                      Bắt đầu giao →
-                    </button>
-                  ) : (
-                    <span className="px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 text-xs font-semibold">
-                      {o.trangThai}
-                    </span>
-                  )}
-                </div>
+            {listToShow.length === 0 ? (
+              <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center text-xs text-slate-400">
+                Không có đơn hàng nào trong mục này.
               </div>
-            ))}
+            ) : (
+              listToShow.map((o) => (
+                <div key={o.maVanDon} className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
+                  <div className="mb-2">
+                    {o.maGoiDichVu === "GDV_HOATOC" ? (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-orange-50 text-[#FF5722] text-xs font-semibold">
+                        <Zap className="w-3.5 h-3.5 fill-current" /> FastPost Hỏa Tốc
+                      </span>
+                    ) : (
+                      <span className="inline-block px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700 text-xs font-semibold">
+                        FastPost Tiêu Chuẩn
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-xs text-slate-400 font-mono mb-0.5">#{o.maVanDon}</div>
+                  <div className="flex items-center justify-between mb-1">
+                    <h3 className="font-bold text-base text-[#0F172A]">{o.nguoiNhanTen}</h3>
+                    <span className="text-xs text-slate-500">{o.nguoiNhanSdt}</span>
+                  </div>
+                  <p className="text-xs text-slate-600 flex items-start gap-1.5 mb-3">
+                    <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
+                    {o.diaChiGiaoChiTiet}, {o.phuongXaGiao}, {o.quanHuyenGiao}
+                  </p>
+
+                  <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+                    <div>
+                      <div className="text-[11px] text-slate-400">Tiền thu hộ</div>
+                      <div className="font-bold text-base text-[#0F172A]">{formatVnd(o.tienCod)}</div>
+                    </div>
+                    {tab === "deliver" ? (
+                      <button
+                        onClick={() => { setSelected(o); setModalMode("detail"); setReceiverName(o.nguoiNhanTen); }}
+                        className="px-4 py-2 bg-[#FF5722] hover:bg-[#E64A19] text-white text-xs font-semibold rounded-xl transition"
+                      >
+                        Bắt đầu giao →
+                      </button>
+                    ) : (
+                      <span className="px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 text-xs font-semibold">
+                        {o.trangThai}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </main>
 
@@ -406,7 +397,7 @@ export default function ShipperPage() {
                     </select>
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-slate-600 mb-1">Ngày giờ hẹn giao lại (lich_hen_giao_lai)</label>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">Ngày giờ hẹn giao lại</label>
                     <input
                       type="datetime-local"
                       value={rescheduleDate}
@@ -420,6 +411,7 @@ export default function ShipperPage() {
                       type="text"
                       value={failNote}
                       onChange={(e) => setFailNote(e.target.value)}
+                      placeholder="Nhập ghi chú..."
                       className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm"
                     />
                   </div>
