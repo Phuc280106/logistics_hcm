@@ -15,6 +15,7 @@ import {
   RotateCcw,
   PackageCheck,
   AlertCircle,
+  Database,
 } from "lucide-react";
 import { apiFetch, formatVnd, UserSession } from "@/lib/api";
 import { DISTRICT_NAMES, HCM_DISTRICTS } from "@/lib/hcmLocations";
@@ -81,9 +82,23 @@ interface KpiItem {
 export default function AdminPage() {
   const router = useRouter();
   const [user, setUser] = useState<UserSession | null>(null);
-  const [section, setSection] = useState<"warehouse" | "dispatch" | "finance" | "sla">("warehouse");
+  const [section, setSection] = useState<"warehouse" | "dispatch" | "finance" | "sla" | "catalog">("warehouse");
   const [notice, setNotice] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
+
+  // Master Data (Nhóm 3)
+  const [vungTuyenList, setVungTuyenList] = useState<{ maVungTuyen: string; tenVungTuyen: string; moTa?: string }[]>([]);
+  const [goiDichVuList, setGoiDichVuList] = useState<{ maGoiDichVu: string; tenGoiDichVu: string; moTa?: string }[]>([]);
+  const [loaiHangList, setLoaiHangList] = useState<{ maLoaiHang: string; tenLoaiHang: string; moTa?: string }[]>([]);
+  const [nganHangList, setNganHangList] = useState<{ maNganHangDm: string; tenNganHang: string; tenVietTat: string }[]>([]);
+  const [tuyenList, setTuyenList] = useState<{ maTuyen: string; maBuuCuc: string; tenTuyen: string; loaiTuyen: string }[]>([]);
+  const [khachHangList, setKhachHangList] = useState<{ maNguoiDung: string; tenShop?: string; loaiKhachHang: string; laTaiKhoanNgam: boolean }[]>([]);
+  const [newBcId, setNewBcId] = useState("");
+  const [newBcName, setNewBcName] = useState("");
+  const [newBcAddr, setNewBcAddr] = useState("");
+  const [newBcType, setNewBcType] = useState("BuuCuc");
+  const [newGdvId, setNewGdvId] = useState("");
+  const [newGdvName, setNewGdvName] = useState("");
 
   // 1. Warehouse & Manifest state
   const [buuCucList, setBuuCucList] = useState<{ maBuuCuc: string; tenBuuCuc: string; loaiKho: string }[]>([]);
@@ -154,6 +169,12 @@ export default function AdminPage() {
     apiFetch<{ chiTiet: typeof chiTietGia }>("/tai-chinh/bang-gia").then((d) => setChiTietGia(d.chiTiet || [])).catch(() => {});
     apiFetch<typeof baoCaoList>("/tai-chinh/bao-cao-doanh-thu").then(setBaoCaoList).catch(() => {});
     apiFetch<{ kpiList: KpiItem[] }>("/doi-soat/bao-cao-sla").then((d) => setKpiList(d.kpiList || [])).catch(() => {});
+    apiFetch<typeof vungTuyenList>("/danh-muc/vung-tuyen").then(setVungTuyenList).catch(() => {});
+    apiFetch<typeof goiDichVuList>("/danh-muc/goi-dich-vu").then(setGoiDichVuList).catch(() => {});
+    apiFetch<typeof loaiHangList>("/danh-muc/loai-hang-hoa").then(setLoaiHangList).catch(() => {});
+    apiFetch<typeof nganHangList>("/danh-muc/ngan-hang").then(setNganHangList).catch(() => {});
+    apiFetch<typeof tuyenList>("/danh-muc/tuyen-giao-hang").then(setTuyenList).catch(() => {});
+    apiFetch<typeof khachHangList>("/khach-hang").then(setKhachHangList).catch(() => {});
   }, [router]);
 
   useEffect(() => {
@@ -374,12 +395,13 @@ export default function AdminPage() {
               { id: "dispatch", label: "Xuất kho & Phân tuyến", icon: Truck },
               { id: "finance", label: "Tài chính & COD", icon: Wallet },
               { id: "sla", label: "Quản trị & SLA", icon: BarChart3 },
+              { id: "catalog", label: "Danh mục & Bưu cục", icon: Database },
             ].map((item) => {
               const Icon = item.icon;
               return (
                 <button
                   key={item.id}
-                  onClick={() => { setErrorMsg(""); setSection(item.id as "warehouse" | "dispatch" | "finance" | "sla"); }}
+                  onClick={() => { setErrorMsg(""); setSection(item.id as "warehouse" | "dispatch" | "finance" | "sla" | "catalog"); }}
                   className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium transition ${
                     section === item.id ? "bg-[#FF5722] text-white" : "text-slate-300 hover:bg-slate-800"
                   }`}
@@ -1091,6 +1113,160 @@ export default function AdminPage() {
                   ))}
                 </div>
               )}
+            </div>
+          )}
+
+          {section === "catalog" && (
+            <div className="space-y-6">
+              <div>
+                <h1 className="text-2xl font-bold">Quản lý Danh mục &amp; Master Data</h1>
+                <p className="text-sm text-slate-500">Bưu cục/Kho, Tuyến giao hàng, Gói dịch vụ, Vùng tuyến, Loại hàng, Ngân hàng và Khách hàng.</p>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Bưu cục / Kho */}
+                <div className="bg-white p-5 rounded-2xl border border-slate-200 space-y-4">
+                  <h2 className="font-bold text-base">Bưu cục &amp; Kho ({buuCucList.length})</h2>
+                  <div className="space-y-2 max-h-56 overflow-y-auto text-xs">
+                    {buuCucList.map((b) => (
+                      <div key={b.maBuuCuc} className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between">
+                        <div>
+                          <div className="font-semibold text-[#0F172A]">{b.tenBuuCuc}</div>
+                          <div className="text-slate-500">{b.maBuuCuc}</div>
+                        </div>
+                        <span className="px-2 py-0.5 rounded-full bg-orange-50 text-[#FF5722] font-semibold">{b.loaiKho}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <form
+                    onSubmit={async (e) => {
+                      e.preventDefault();
+                      setErrorMsg("");
+                      try {
+                        await apiFetch("/danh-muc/buu-cuc", {
+                          method: "POST",
+                          body: JSON.stringify({
+                            maBuuCuc: newBcId,
+                            tenBuuCuc: newBcName,
+                            loaiKho: newBcType,
+                            diaChi: newBcAddr,
+                            soDuQuyKet: 0,
+                            trangThaiHoatDong: "HoatDong",
+                          }),
+                        });
+                        const list = await apiFetch<typeof buuCucList>("/danh-muc/buu-cuc");
+                        setBuuCucList(list);
+                        setNewBcId("");
+                        setNewBcName("");
+                        setNewBcAddr("");
+                        setNotice(`Đã lưu bưu cục ${newBcId}`);
+                      } catch (err) {
+                        setErrorMsg(err instanceof Error ? err.message : "Lỗi lưu bưu cục");
+                      }
+                    }}
+                    className="pt-3 border-t border-slate-100 space-y-2"
+                  >
+                    <div className="grid grid-cols-3 gap-2">
+                      <input value={newBcId} onChange={(e) => setNewBcId(e.target.value)} placeholder="Mã BC (VD: BC_Q3)" className="px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs" required />
+                      <input value={newBcName} onChange={(e) => setNewBcName(e.target.value)} placeholder="Tên bưu cục" className="px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs" required />
+                      <select value={newBcType} onChange={(e) => setNewBcType(e.target.value)} className="px-2 py-1.5 border border-slate-300 rounded-lg text-xs bg-white">
+                        <option value="BuuCuc">Bưu cục</option>
+                        <option value="KhoTong">Kho tổng</option>
+                      </select>
+                    </div>
+                    <div className="flex gap-2">
+                      <input value={newBcAddr} onChange={(e) => setNewBcAddr(e.target.value)} placeholder="Địa chỉ..." className="flex-1 px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs" required />
+                      <button type="submit" className="px-3 py-1.5 bg-[#0F172A] text-white rounded-lg text-xs font-semibold">Lưu</button>
+                    </div>
+                  </form>
+                </div>
+
+                {/* Gói dịch vụ & Vùng tuyến */}
+                <div className="bg-white p-5 rounded-2xl border border-slate-200 space-y-4">
+                  <h2 className="font-bold text-base">Gói dịch vụ ({goiDichVuList.length}) &amp; Vùng tuyến ({vungTuyenList.length})</h2>
+                  <div className="space-y-2 text-xs">
+                    {goiDichVuList.map((g) => (
+                      <div key={g.maGoiDichVu} className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 flex justify-between">
+                        <span className="font-semibold">{g.tenGoiDichVu}</span>
+                        <span className="text-slate-500">{g.maGoiDichVu}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <form
+                    onSubmit={async (e) => {
+                      e.preventDefault();
+                      setErrorMsg("");
+                      try {
+                        await apiFetch("/danh-muc/goi-dich-vu", {
+                          method: "POST",
+                          body: JSON.stringify({ maGoiDichVu: newGdvId, tenGoiDichVu: newGdvName, moTa: "" }),
+                        });
+                        setGoiDichVuList(await apiFetch<typeof goiDichVuList>("/danh-muc/goi-dich-vu"));
+                        setNewGdvId("");
+                        setNewGdvName("");
+                        setNotice(`Đã lưu gói dịch vụ ${newGdvId}`);
+                      } catch (err) {
+                        setErrorMsg(err instanceof Error ? err.message : "Lỗi lưu gói dịch vụ");
+                      }
+                    }}
+                    className="flex gap-2 pt-2 border-t border-slate-100"
+                  >
+                    <input value={newGdvId} onChange={(e) => setNewGdvId(e.target.value)} placeholder="Mã gói (VD: GDV_TIETKIEM)" className="w-40 px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs" required />
+                    <input value={newGdvName} onChange={(e) => setNewGdvName(e.target.value)} placeholder="Tên gói dịch vụ" className="flex-1 px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs" required />
+                    <button type="submit" className="px-3 py-1.5 bg-[#0F172A] text-white rounded-lg text-xs font-semibold">Lưu</button>
+                  </form>
+                  <div className="pt-2 border-t border-slate-100 flex flex-wrap gap-2 text-xs">
+                    {vungTuyenList.map((v) => (
+                      <span key={v.maVungTuyen} className="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700 font-medium">
+                        {v.maVungTuyen}: {v.tenVungTuyen}
+                      </span>
+                    ))}
+                    {loaiHangList.map((l) => (
+                      <span key={l.maLoaiHang} className="px-2.5 py-1 rounded-lg bg-orange-50 text-[#FF5722] font-medium">
+                        {l.tenLoaiHang}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Tuyến giao hàng & Ngân hàng */}
+                <div className="bg-white p-5 rounded-2xl border border-slate-200 space-y-3">
+                  <h2 className="font-bold text-base">Tuyến giao hàng ({tuyenList.length}) &amp; Ngân hàng ({nganHangList.length})</h2>
+                  <div className="space-y-1.5 text-xs">
+                    {tuyenList.map((t) => (
+                      <div key={t.maTuyen} className="p-2 rounded-lg bg-slate-50 border border-slate-200 flex justify-between">
+                        <span className="font-semibold">{t.tenTuyen} ({t.maTuyen})</span>
+                        <span className="text-slate-500">{t.maBuuCuc} · {t.loaiTuyen}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="pt-2 border-t border-slate-100 flex flex-wrap gap-2 text-xs">
+                    {nganHangList.map((nh) => (
+                      <span key={nh.maNganHangDm} className="px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 font-semibold">
+                        {nh.tenVietTat} — {nh.tenNganHang}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Khách hàng / Shop */}
+                <div className="bg-white p-5 rounded-2xl border border-slate-200 space-y-3">
+                  <h2 className="font-bold text-base">Danh sách Khách hàng / Shop ({khachHangList.length})</h2>
+                  <div className="space-y-1.5 text-xs max-h-56 overflow-y-auto">
+                    {khachHangList.map((kh) => (
+                      <div key={kh.maNguoiDung} className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between">
+                        <div>
+                          <div className="font-semibold text-[#0F172A]">{kh.tenShop || kh.maNguoiDung}</div>
+                          <div className="text-slate-500">ID: {kh.maNguoiDung}</div>
+                        </div>
+                        <span className="px-2 py-0.5 rounded-full bg-slate-200 text-slate-700 font-semibold">{kh.loaiKhachHang}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
             </div>
           )}
         </main>

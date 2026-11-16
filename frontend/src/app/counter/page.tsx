@@ -45,11 +45,50 @@ export default function CounterPage() {
   const [tienShipperNop, setTienShipperNop] = useState<number>(0);
   const [tienThucKiemKe, setTienThucKiemKe] = useState<number>(0);
   const [closeMsg, setCloseMsg] = useState("");
+  const [reprintReason, setReprintReason] = useState("");
+  const [printLogs, setPrintLogs] = useState<{
+    maNhatKy: string;
+    maVanDon: string;
+    maNhanVienQuay: string;
+    thoiGianIn: string;
+    soLanIn: number;
+    loaiIn: string;
+    lyDoInLai?: string;
+  }[]>([]);
+
+  async function loadPrintLogs() {
+    try {
+      const logs = await apiFetch<typeof printLogs>("/don-hang/in-tem/nhat-ky");
+      setPrintLogs(logs);
+    } catch {
+      // ignore
+    }
+  }
+
+  async function handlePrintLabel() {
+    if (createdCode) {
+      try {
+        await apiFetch(`/don-hang/${createdCode}/in-tem`, {
+          method: "POST",
+          body: JSON.stringify({
+            maNhanVienQuay: user?.maNhanVien || "NV_QUAY_01",
+            lyDoInLai: reprintReason || null,
+          }),
+        });
+        setReprintReason("");
+        await loadPrintLogs();
+      } catch {
+        // still allow print preview
+      }
+    }
+    window.print();
+  }
 
   useEffect(() => {
     const raw = localStorage.getItem("fastpost_user");
     if (!raw) { router.push("/"); return; }
     setUser(JSON.parse(raw));
+    loadPrintLogs();
   }, [router]);
 
   useEffect(() => {
@@ -490,14 +529,37 @@ export default function CounterPage() {
                   <span>TL: {fee.trongLuongTinhCuoc} kg</span>
                 </div>
               </div>
+              <input
+                value={reprintReason}
+                onChange={(e) => setReprintReason(e.target.value)}
+                placeholder="Lý do in lại (nếu là in lại tem)..."
+                className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs"
+              />
               <div className="grid grid-cols-2 gap-3">
-                <button onClick={() => window.print()} className="py-2.5 border border-slate-300 rounded-xl font-semibold text-sm">
+                <button onClick={handlePrintLabel} className="py-2.5 border border-slate-300 rounded-xl font-semibold text-sm hover:bg-slate-50">
                   In tem ngay
                 </button>
                 <button onClick={resetOrderForm} className="py-2.5 bg-[#FF5722] text-white rounded-xl font-semibold text-sm">
                   Lên đơn mới
                 </button>
               </div>
+              {printLogs.length > 0 && (
+                <div className="pt-4 border-t border-slate-100 space-y-2">
+                  <div className="text-xs font-semibold text-slate-600">Nhật ký in tem gần đây</div>
+                  <div className="max-h-40 overflow-y-auto space-y-1.5 text-xs">
+                    {printLogs.slice(0, 8).map((log) => (
+                      <div key={log.maNhatKy} className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-slate-50 border border-slate-200">
+                        <div>
+                          <span className="font-semibold">#{log.maVanDon}</span> ·{" "}
+                          <span className="text-slate-500">{log.loaiIn} (Lần {log.soLanIn})</span>
+                          {log.lyDoInLai && <span className="text-slate-400"> — {log.lyDoInLai}</span>}
+                        </div>
+                        <span className="text-[11px] text-slate-400">{log.maNhanVienQuay}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
