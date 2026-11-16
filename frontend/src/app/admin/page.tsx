@@ -86,6 +86,10 @@ export default function AdminPage() {
   const [errorMsg, setErrorMsg] = useState("");
 
   // 1. Warehouse & Manifest state
+  const [buuCucList, setBuuCucList] = useState<{ maBuuCuc: string; tenBuuCuc: string; loaiKho: string }[]>([]);
+  const [khoDi, setKhoDi] = useState("KHO_Q1");
+  const [khoDen, setKhoDen] = useState("BC_BENNGHE");
+  const [donChoKho, setDonChoKho] = useState<{ maVanDon: string; nguoiNhanTen: string; quanHuyenGiao: string; phuongXaGiao: string }[]>([]);
   const [manifests, setManifests] = useState<ManifestItem[]>([]);
   const [scanCode, setScanCode] = useState("");
   const [inspectManifest, setInspectManifest] = useState<string | null>(null);
@@ -122,6 +126,13 @@ export default function AdminPage() {
     setUser(JSON.parse(raw));
 
     apiFetch<ManifestItem[]>("/manifest").then(setManifests).catch(() => setErrorMsg("Chưa kết nối Backend để tải dữ liệu thực."));
+    apiFetch<{ maBuuCuc: string; tenBuuCuc: string; loaiKho: string }[]>("/kho/buu-cuc").then((bcs) => {
+      setBuuCucList(bcs);
+      if (bcs.length >= 2) {
+        setKhoDi(bcs[0].maBuuCuc);
+        setKhoDen(bcs[1].maBuuCuc);
+      }
+    }).catch(() => {});
     apiFetch<BienBanItem[]>("/manifest/bien-ban-bat-thuong").then(setIncidents).catch(() => {});
     apiFetch<PhieuXuatItem[]>("/kho/phieu-xuat").then(setPhieuXuatList).catch(() => {});
     apiFetch<{ tieuTuyenList: TieuTuyenItem[] }>("/kho/tuyen").then((d) => setSubRoutes(d.tieuTuyenList || [])).catch(() => {});
@@ -129,6 +140,15 @@ export default function AdminPage() {
     apiFetch<PhieuDoiSoatItem[]>("/doi-soat/shipper").then(setSlips).catch(() => {});
     apiFetch<{ kpiList: KpiItem[] }>("/doi-soat/bao-cao-sla").then((d) => setKpiList(d.kpiList || [])).catch(() => {});
   }, [router]);
+
+  useEffect(() => {
+    if (!khoDi) return;
+    apiFetch<{ maVanDon: string; nguoiNhanTen: string; quanHuyenGiao: string; phuongXaGiao: string }[]>(
+      `/kho/don-cho-luan-chuyen?maBuuCuc=${khoDi}`
+    )
+      .then(setDonChoKho)
+      .catch(() => setDonChoKho([]));
+  }, [khoDi]);
 
   function handleDistrictChange(newDistrict: string) {
     setTtDistrict(newDistrict);
@@ -141,26 +161,28 @@ export default function AdminPage() {
     try {
       const m = await apiFetch<ManifestItem>("/manifest", {
         method: "POST",
-        body: JSON.stringify({ maBuuCucDi: "KHO_Q1", maBuuCucDen: "BC_BENNGHE", maNhanVienLap: user?.maNhanVien || "NV_ADMIN_01" }),
+        body: JSON.stringify({ maBuuCucDi: khoDi, maBuuCucDen: khoDen, maNhanVienLap: user?.maNhanVien || "NV_ADMIN_01" }),
       });
       setManifests((prev) => [m, ...prev]);
-      setNotice(`Đã tạo Manifest mới: ${m.maManifest}`);
+      setNotice(`Đã tạo Manifest mới: ${m.maManifest} (${khoDi} → ${khoDen})`);
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : "Lỗi tạo Manifest");
     }
   }
 
-  async function handleScanToManifest(maManifest: string) {
-    if (!scanCode.trim()) return;
+  async function handleScanToManifest(maManifest: string, overrideCode?: string) {
+    const code = (overrideCode ?? scanCode).trim();
+    if (!code) return;
     setErrorMsg("");
     try {
       const updated = await apiFetch<ManifestItem>(`/manifest/${maManifest}/quet-gom-don`, {
         method: "POST",
-        body: JSON.stringify({ maVanDon: scanCode.trim() }),
+        body: JSON.stringify({ maVanDon: code }),
       });
       setManifests((prev) => prev.map((m) => (m.maManifest === maManifest ? updated : m)));
-      setNotice(`Đã quét gom đơn ${scanCode.trim()} vào ${maManifest}`);
-      setScanCode("");
+      setDonChoKho((prev) => prev.filter((d) => d.maVanDon !== code));
+      setNotice(`Đã quét gom đơn ${code} vào ${maManifest}`);
+      if (!overrideCode) setScanCode("");
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : "Lỗi quét gom đơn");
     }
@@ -395,17 +417,78 @@ export default function AdminPage() {
           {section === "warehouse" && (
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               <div className="lg:col-span-2 space-y-5">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h1 className="text-2xl font-bold">Quản lý Kho &amp; Manifest</h1>
-                    <p className="text-sm text-slate-500">Quét mã gom đơn, luân chuyển và kiểm nhận chi tiết từng kiện tại kho đích.</p>
+                <div>
+                  <h1 className="text-2xl font-bold">Quản lý Kho &amp; Luân chuyển Manifest</h1>
+                  <p className="text-sm text-slate-500">Chọn tuyến kho gửi → kho nhận, quét gom đơn và kiểm nhận chi tiết từng kiện tại kho đích.</p>
+                </div>
+
+                {/* Chọn Kho đi -> Kho đến & Tạo Manifest */}
+                <div className="bg-white p-5 rounded-2xl border border-slate-200 space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-600 mb-1.5">Kho / Bưu cục gửi</label>
+                      <select
+                        value={khoDi}
+                        onChange={(e) => setKhoDi(e.target.value)}
+                        className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-xl text-sm"
+                      >
+                        {buuCucList.length === 0 ? (
+                          <option value={khoDi}>{khoDi}</option>
+                        ) : (
+                          buuCucList.map((b) => (
+                            <option key={b.maBuuCuc} value={b.maBuuCuc}>{b.tenBuuCuc} ({b.maBuuCuc})</option>
+                          ))
+                        )}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-600 mb-1.5">Kho / Bưu cục nhận</label>
+                      <select
+                        value={khoDen}
+                        onChange={(e) => setKhoDen(e.target.value)}
+                        className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-xl text-sm"
+                      >
+                        {buuCucList.length === 0 ? (
+                          <option value={khoDen}>{khoDen}</option>
+                        ) : (
+                          buuCucList.map((b) => (
+                            <option key={b.maBuuCuc} value={b.maBuuCuc}>{b.tenBuuCuc} ({b.maBuuCuc})</option>
+                          ))
+                        )}
+                      </select>
+                    </div>
+                    <button
+                      onClick={handleCreateManifest}
+                      className="px-4 py-2.5 bg-[#FF5722] hover:bg-[#E64A19] text-white text-sm font-semibold rounded-xl"
+                    >
+                      + Tạo Manifest luân chuyển
+                    </button>
                   </div>
-                  <button
-                    onClick={handleCreateManifest}
-                    className="px-4 py-2.5 bg-[#FF5722] hover:bg-[#E64A19] text-white text-sm font-semibold rounded-xl"
-                  >
-                    + Tạo Manifest
-                  </button>
+
+                  {/* Đơn đang nằm tại kho gửi để chọn nhanh */}
+                  <div className="border-t border-slate-100 pt-3">
+                    <div className="text-xs font-semibold text-slate-500 uppercase mb-2">
+                      Đơn đang lưu tại {khoDi} chờ luân chuyển ({donChoKho.length})
+                    </div>
+                    {donChoKho.length === 0 ? (
+                      <div className="text-xs text-slate-400">Không có đơn trạng thái DaNhapKho tại {khoDi}.</div>
+                    ) : (
+                      <div className="flex flex-wrap gap-2">
+                        {donChoKho.map((d) => (
+                          <button
+                            key={d.maVanDon}
+                            type="button"
+                            disabled={!manifests[0] || manifests[0].trangThai !== "DangKhoiTao"}
+                            onClick={() => manifests[0] && handleScanToManifest(manifests[0].maManifest, d.maVanDon)}
+                            className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-orange-50 hover:text-[#FF5722] border border-slate-200 text-xs font-medium transition disabled:opacity-50"
+                            title={`Giao tới ${d.phuongXaGiao}, ${d.quanHuyenGiao}`}
+                          >
+                            + #{d.maVanDon} ({d.quanHuyenGiao})
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {/* Barcode Scan Box */}
