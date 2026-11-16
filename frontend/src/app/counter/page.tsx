@@ -38,6 +38,7 @@ export default function CounterPage() {
     tongCuoc: 20000,
   });
   const [createdCode, setCreatedCode] = useState("");
+  const [qrInfo, setQrInfo] = useState<{ maGiaoDichQr: string; qrUrl: string } | null>(null);
 
   // Cash close state
   const [tienCuocQuay, setTienCuocQuay] = useState<number>(0);
@@ -100,6 +101,13 @@ export default function CounterPage() {
         }),
       });
       setCreatedCode(res.maVanDon);
+      try {
+        const qrRes = await apiFetch<{ giaoDich: { maGiaoDichQr: string }; qrUrl: string }>(
+          `/don-hang/${res.maVanDon}/vietqr`,
+          { method: "POST" }
+        );
+        setQrInfo({ maGiaoDichQr: qrRes.giaoDich.maGiaoDichQr, qrUrl: qrRes.qrUrl });
+      } catch {}
       setStep(2);
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : "Không thể kết nối Backend để tạo đơn hàng");
@@ -442,12 +450,24 @@ export default function CounterPage() {
               <h2 className="text-xl font-bold">Thanh toán VietQR động</h2>
               <p className="text-sm text-slate-500">Mã vận đơn: <strong>{createdCode ? `#${createdCode}` : "(Chưa có đơn mới)"}</strong></p>
               <div className="text-3xl font-bold text-[#FF5722]">{formatVnd(fee.tongCuoc)}</div>
-              <div className="w-48 h-48 mx-auto bg-slate-100 border border-slate-300 rounded-2xl flex items-center justify-center">
-                <QrCode className="w-28 h-28 text-[#0F172A]" />
+              <div className="w-56 h-56 mx-auto bg-slate-50 border border-slate-200 rounded-2xl flex items-center justify-center overflow-hidden p-2">
+                {qrInfo?.qrUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={qrInfo.qrUrl} alt="VietQR" className="w-full h-full object-contain" />
+                ) : (
+                  <QrCode className="w-28 h-28 text-[#0F172A]" />
+                )}
               </div>
               <p className="text-xs text-slate-500">Nội dung CK: <code>FASTPOST {createdCode}</code></p>
               <button
-                onClick={() => setStep(3)}
+                onClick={async () => {
+                  if (qrInfo?.maGiaoDichQr) {
+                    try {
+                      await apiFetch(`/don-hang/vietqr/${qrInfo.maGiaoDichQr}/xac-nhan`, { method: "POST" });
+                    } catch {}
+                  }
+                  setStep(3);
+                }}
                 className="w-full py-3 bg-[#FF5722] text-white font-semibold rounded-xl"
               >
                 Xác nhận đã thu tiền → In tem mã vạch
