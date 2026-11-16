@@ -39,6 +39,7 @@ export default function ShipperPage() {
   const [rescheduleDate, setRescheduleDate] = useState("");
   const [failNote, setFailNote] = useState("");
   const [codWallet, setCodWallet] = useState(0);
+  const [settleMsg, setSettleMsg] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
 
   useEffect(() => {
@@ -138,6 +139,28 @@ export default function ShipperPage() {
       );
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : "Lỗi xác nhận lấy hàng");
+    }
+  }
+
+  async function handleRequestSettlement() {
+    if (codWallet <= 0) return;
+    setErrorMsg("");
+    setSettleMsg("");
+    try {
+      const created = await apiFetch<{ maDoiSoat: string }>("/doi-soat/shipper", {
+        method: "POST",
+        body: JSON.stringify({
+          maShipper: user?.maNhanVien || "NV_SHIP_01",
+          maNhanVienQuay: "NV_QUAY_01",
+          tongDonThanhCong: doneOrders.length,
+          tongTienCod: codWallet,
+          tongCuocMat: 0,
+        }),
+      });
+      await apiFetch(`/doi-soat/shipper/${created.maDoiSoat}/gui-quay`, { method: "POST" });
+      setSettleMsg(`Đã gửi phiếu nộp ${formatVnd(codWallet)} (${created.maDoiSoat}) — chờ Quầy/Admin khớp lệnh.`);
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Lỗi gửi yêu cầu nộp tiền COD");
     }
   }
 
@@ -243,6 +266,19 @@ export default function ShipperPage() {
               <span>Hạn mức 3.000.000đ</span>
               <span>{pct}%</span>
             </div>
+            {codWallet > 0 && (
+              <button
+                onClick={handleRequestSettlement}
+                className="mt-3 w-full py-2 rounded-xl bg-[#FF5722] hover:bg-[#E64A19] text-white text-xs font-semibold transition"
+              >
+                Nộp tiền COD về quầy ({formatVnd(codWallet)})
+              </button>
+            )}
+            {settleMsg && (
+              <div className="mt-2 text-[11px] text-emerald-300 bg-emerald-500/15 px-2.5 py-1.5 rounded-lg">
+                {settleMsg}
+              </div>
+            )}
           </div>
 
           {/* Filter Tabs */}

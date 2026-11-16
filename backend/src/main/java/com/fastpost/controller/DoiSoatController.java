@@ -96,37 +96,44 @@ public class DoiSoatController {
     @Transactional
     public ResponseEntity<?> doiSoat(@PathVariable String maDoiSoat, @RequestBody KhopLenhRequest req) {
         return phieuRepo.findById(maDoiSoat).map(p -> {
-            BigDecimal thucNop = req.soTienThucNop();
-            BigDecimal phaiNop = p.getTongPhaiNop();
+            BigDecimal thucNop = req.soTienThucNop() != null ? req.soTienThucNop() : BigDecimal.ZERO;
+            BigDecimal phaiNop = p.getTongPhaiNop() != null ? p.getTongPhaiNop() : BigDecimal.ZERO;
             p.setSoTienThucNop(thucNop);
 
+            ViCongNoShipper vi = viRepo.findByMaShipper(p.getMaShipper()).orElseGet(() -> {
+                ViCongNoShipper created = new ViCongNoShipper();
+                created.setMaVi("VI-" + p.getMaShipper());
+                created.setMaShipper(p.getMaShipper());
+                created.setTongNoLuyKe(BigDecimal.ZERO);
+                return created;
+            });
+
+            BigDecimal newDebt = vi.getTongNoLuyKe().subtract(thucNop).max(BigDecimal.ZERO);
+            vi.setTongNoLuyKe(newDebt);
+            if (newDebt.compareTo(BigDecimal.ZERO) == 0) {
+                vi.setDaKhoaNhanDon(false);
+                vi.setThoiDiemPhatSinhNo(null);
+                shipperRepo.findById(p.getMaShipper()).ifPresent(s -> {
+                    s.setTrangThaiNhanDon("SanSang");
+                    shipperRepo.save(s);
+                });
+            } else if (newDebt.compareTo(DEBT_LIMIT) >= 0) {
+                vi.setDaKhoaNhanDon(true);
+                shipperRepo.findById(p.getMaShipper()).ifPresent(s -> {
+                    s.setTrangThaiNhanDon("KhoaTamThoi");
+                    shipperRepo.save(s);
+                });
+            }
+            viRepo.save(vi);
+
             int cmp = thucNop.compareTo(phaiNop);
-            if (cmp == 0) {
+            if (cmp >= 0) {
                 p.setSoTienThieu(BigDecimal.ZERO);
                 p.setTrangThai("DaKhopTien");
-            } else if (cmp > 0) {
-                // Nop du -> giu nguyen DangKiemDem de dem lai
-                p.setTrangThai("DangKiemDem");
             } else {
                 BigDecimal thieu = phaiNop.subtract(thucNop);
                 p.setSoTienThieu(thieu);
-                ViCongNoShipper vi = viRepo.findByMaShipper(p.getMaShipper()).orElseGet(() -> {
-                    ViCongNoShipper created = new ViCongNoShipper();
-                    created.setMaVi("VI-" + p.getMaShipper());
-                    created.setMaShipper(p.getMaShipper());
-                    return created;
-                });
-                vi.setTongNoLuyKe(vi.getTongNoLuyKe().add(thieu));
-                if (vi.getThoiDiemPhatSinhNo() == null) {
-                    vi.setThoiDiemPhatSinhNo(LocalDateTime.now());
-                }
-                if (vi.getTongNoLuyKe().compareTo(DEBT_LIMIT) > 0) {
-                    vi.setDaKhoaNhanDon(true);
-                    p.setTrangThai("KhoaTaiKhoanShipper");
-                } else {
-                    p.setTrangThai("PhatSinhCongNo");
-                }
-                viRepo.save(vi);
+                p.setTrangThai(newDebt.compareTo(DEBT_LIMIT) >= 0 ? "KhoaTaiKhoanShipper" : "PhatSinhCongNo");
             }
             return ResponseEntity.ok(phieuRepo.save(p));
         }).orElse(ResponseEntity.notFound().build());
