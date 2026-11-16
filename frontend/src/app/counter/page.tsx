@@ -234,8 +234,16 @@ export default function CounterPage() {
                         Hàng dễ vỡ (+3.000đ)
                       </label>
                       <div>
-                        <label className="block text-xs text-slate-500 mb-1">Tiền COD (VNĐ)</label>
-                        <input type="number" value={cod} onChange={(e) => setCod(Number(e.target.value))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm" />
+                        <label className="block text-xs text-slate-500 mb-1">Tiền thu hộ COD (VNĐ)</label>
+                        <input
+                          type="number"
+                          min={0}
+                          step={1000}
+                          value={cod || ""}
+                          onChange={(e) => setCod(Number(e.target.value || 0))}
+                          placeholder="Ví dụ: 500000"
+                          className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm"
+                        />
                       </div>
                     </div>
                   </div>
@@ -256,11 +264,18 @@ export default function CounterPage() {
                     <div className="flex justify-between"><span className="text-slate-500">Cước sàn</span><span>{formatVnd(fee.cuocSan)}</span></div>
                     <div className="flex justify-between"><span className="text-slate-500">Vượt cân</span><span>{formatVnd(fee.cuocVuotCan)}</span></div>
                     <div className="flex justify-between"><span className="text-slate-500">Phụ phí</span><span>{formatVnd(fee.phuPhi)}</span></div>
-                    <div className="flex justify-between"><span className="text-slate-500">Phí COD (1%)</span><span>{formatVnd(fee.phiCod)}</span></div>
+                    <div className="flex justify-between"><span className="text-slate-500">Phí dịch vụ COD (1%)</span><span>{formatVnd(fee.phiCod)}</span></div>
                   </div>
                   <div className="border-t border-slate-200 pt-3 flex items-baseline justify-between">
                     <span className="font-bold">Tổng cước</span>
                     <span className="text-2xl font-bold text-[#0F172A]">{formatVnd(fee.tongCuoc)}</span>
+                  </div>
+                  <div className="p-3 rounded-xl bg-orange-50 border border-orange-200/70 text-xs space-y-1">
+                    <div className="flex justify-between font-semibold text-[#0F172A]">
+                      <span>Tiền thu hộ (COD):</span>
+                      <span className="text-[#FF5722]">{formatVnd(cod)}</span>
+                    </div>
+                    <div className="text-slate-500">Tiền thu hộ không bao gồm trong tổng cước.</div>
                   </div>
                   <button
                     onClick={handleCreateOrder}
