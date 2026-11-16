@@ -2,14 +2,40 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Zap, Search, PackagePlus, MapPin, LogOut, CheckCircle2, AlertCircle } from "lucide-react";
+import { Zap, Search, PackagePlus, MapPin, LogOut, CheckCircle2, AlertCircle, BookUser, Trash2, Landmark } from "lucide-react";
 import { apiFetch, formatVnd, UserSession } from "@/lib/api";
 import { DISTRICT_NAMES, HCM_DISTRICTS } from "@/lib/hcmLocations";
+
+interface SoDiaChiItem {
+  maDiaChi: string;
+  maKhachHang: string;
+  tenNguoiNhan: string;
+  soDienThoai: string;
+  diaChiChiTiet: string;
+  phuongXa: string;
+  quanHuyen: string;
+  laMacDinh: boolean;
+}
+
+interface TaiKhoanNganHangItem {
+  maTkNganHang: string;
+  maKhachHang: string;
+  maNganHangDm: string;
+  soTaiKhoan: string;
+  tenChuTaiKhoan: string;
+  laMacDinhCod: boolean;
+}
+
+interface NganHangItem {
+  maNganHangDm: string;
+  tenNganHang: string;
+  tenVietTat: string;
+}
 
 export default function CustomerPage() {
   const router = useRouter();
   const [user, setUser] = useState<UserSession | null>(null);
-  const [tab, setTab] = useState<"create" | "track">("create");
+  const [tab, setTab] = useState<"create" | "track" | "address">("create");
   const [receiverName, setReceiverName] = useState("");
   const [receiverPhone, setReceiverPhone] = useState("");
   const [address, setAddress] = useState("");
@@ -30,11 +56,122 @@ export default function CustomerPage() {
     hanhTrinh: { thoiGian: string; trangThaiGhiNhan: string; moTaChiTiet: string }[];
   } | null>(null);
 
+  const [addresses, setAddresses] = useState<SoDiaChiItem[]>([]);
+  const [newAddrName, setNewAddrName] = useState("");
+  const [newAddrPhone, setNewAddrPhone] = useState("");
+  const [newAddrDetail, setNewAddrDetail] = useState("");
+  const [newAddrDistrict, setNewAddrDistrict] = useState("Quận 1");
+  const [newAddrWard, setNewAddrWard] = useState(HCM_DISTRICTS["Quận 1"][0]);
+
+  const [bankAccounts, setBankAccounts] = useState<TaiKhoanNganHangItem[]>([]);
+  const [banks, setBanks] = useState<NganHangItem[]>([]);
+  const [newBankId, setNewBankId] = useState("NH_VCB");
+  const [newBankAcc, setNewBankAcc] = useState("");
+  const [newBankOwner, setNewBankOwner] = useState("");
+
+  async function loadAddressBook(maKh: string) {
+    try {
+      const [addrRes, accRes, bankRes] = await Promise.all([
+        apiFetch<SoDiaChiItem[]>(`/khach-hang/${maKh}/dia-chi`),
+        apiFetch<TaiKhoanNganHangItem[]>(`/khach-hang/${maKh}/ngan-hang`),
+        apiFetch<NganHangItem[]>(`/danh-muc/ngan-hang`),
+      ]);
+      setAddresses(addrRes);
+      setBankAccounts(accRes);
+      setBanks(bankRes);
+      if (bankRes.length > 0 && !bankRes.some((b) => b.maNganHangDm === newBankId)) {
+        setNewBankId(bankRes[0].maNganHangDm);
+      }
+    } catch {
+      // ignore if not customer role
+    }
+  }
+
   useEffect(() => {
     const raw = localStorage.getItem("fastpost_user");
     if (!raw) { router.push("/"); return; }
-    setUser(JSON.parse(raw));
+    const u: UserSession = JSON.parse(raw);
+    setUser(u);
+    if (u.maNguoiDung) {
+      loadAddressBook(u.maNguoiDung);
+    }
   }, [router]);
+
+  function applySavedAddress(addr: SoDiaChiItem) {
+    setReceiverName(addr.tenNguoiNhan);
+    setReceiverPhone(addr.soDienThoai);
+    setAddress(addr.diaChiChiTiet);
+    setDistrict(addr.quanHuyen);
+    setWard(addr.phuongXa);
+    setTab("create");
+  }
+
+  async function handleAddAddress(e: React.FormEvent) {
+    e.preventDefault();
+    if (!user?.maNguoiDung) return;
+    setErrorMsg("");
+    try {
+      await apiFetch(`/khach-hang/${user.maNguoiDung}/dia-chi`, {
+        method: "POST",
+        body: JSON.stringify({
+          tenNguoiNhan: newAddrName,
+          soDienThoai: newAddrPhone,
+          diaChiChiTiet: newAddrDetail,
+          quanHuyen: newAddrDistrict,
+          phuongXa: newAddrWard,
+          laMacDinh: addresses.length === 0,
+        }),
+      });
+      setNewAddrName("");
+      setNewAddrPhone("");
+      setNewAddrDetail("");
+      await loadAddressBook(user.maNguoiDung);
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Không thể thêm địa chỉ");
+    }
+  }
+
+  async function handleDeleteAddress(maDiaChi: string) {
+    if (!user?.maNguoiDung) return;
+    try {
+      await apiFetch(`/khach-hang/dia-chi/${maDiaChi}`, { method: "DELETE" });
+      await loadAddressBook(user.maNguoiDung);
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Không thể xóa địa chỉ");
+    }
+  }
+
+  async function handleAddBank(e: React.FormEvent) {
+    e.preventDefault();
+    if (!user?.maNguoiDung) return;
+    setErrorMsg("");
+    try {
+      await apiFetch(`/khach-hang/${user.maNguoiDung}/ngan-hang`, {
+        method: "POST",
+        body: JSON.stringify({
+          maNganHangDm: newBankId,
+          soTaiKhoan: newBankAcc,
+          tenChuTaiKhoan: newBankOwner,
+          laMacDinhCod: bankAccounts.length === 0,
+        }),
+      });
+      setNewBankAcc("");
+      setNewBankOwner("");
+      await loadAddressBook(user.maNguoiDung);
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Không thể thêm tài khoản ngân hàng");
+    }
+  }
+
+  async function handleDeleteBank(maTkNganHang: string) {
+    if (!user?.maNguoiDung) return;
+    try {
+      await apiFetch(`/khach-hang/ngan-hang/${maTkNganHang}`, { method: "DELETE" });
+      await loadAddressBook(user.maNguoiDung);
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Không thể xóa tài khoản ngân hàng");
+    }
+  }
 
   function handleDistrictChange(newDistrict: string) {
     setDistrict(newDistrict);
@@ -124,18 +261,24 @@ export default function CustomerPage() {
         </header>
 
         <div className="p-4 space-y-4 flex-1">
-          <div className="grid grid-cols-2 bg-slate-200/80 p-1 rounded-xl text-xs font-semibold">
+          <div className="grid grid-cols-3 bg-slate-200/80 p-1 rounded-xl text-[11px] font-semibold">
             <button
               onClick={() => { setTab("create"); setErrorMsg(""); }}
-              className={`py-2 rounded-lg flex items-center justify-center gap-1.5 ${tab === "create" ? "bg-[#FF5722] text-white" : "text-slate-600"}`}
+              className={`py-2 rounded-lg flex items-center justify-center gap-1 ${tab === "create" ? "bg-[#FF5722] text-white" : "text-slate-600"}`}
             >
-              <PackagePlus className="w-4 h-4" /> Đặt đơn Online
+              <PackagePlus className="w-3.5 h-3.5" /> Đặt đơn
             </button>
             <button
               onClick={() => { setTab("track"); setErrorMsg(""); }}
-              className={`py-2 rounded-lg flex items-center justify-center gap-1.5 ${tab === "track" ? "bg-[#FF5722] text-white" : "text-slate-600"}`}
+              className={`py-2 rounded-lg flex items-center justify-center gap-1 ${tab === "track" ? "bg-[#FF5722] text-white" : "text-slate-600"}`}
             >
-              <Search className="w-4 h-4" /> Tra cứu hành trình
+              <Search className="w-3.5 h-3.5" /> Tra cứu
+            </button>
+            <button
+              onClick={() => { setTab("address"); setErrorMsg(""); }}
+              className={`py-2 rounded-lg flex items-center justify-center gap-1 ${tab === "address" ? "bg-[#FF5722] text-white" : "text-slate-600"}`}
+            >
+              <BookUser className="w-3.5 h-3.5" /> Sổ địa chỉ
             </button>
           </div>
 
@@ -147,7 +290,26 @@ export default function CustomerPage() {
 
           {tab === "create" ? (
             <form onSubmit={handleCreateOnline} className="bg-white rounded-2xl border border-slate-200 p-4 space-y-3">
-              <h2 className="font-bold text-base">Tạo đơn gửi hàng mới</h2>
+              <div className="flex items-center justify-between">
+                <h2 className="font-bold text-base">Tạo đơn gửi hàng mới</h2>
+                {addresses.length > 0 && (
+                  <select
+                    defaultValue=""
+                    onChange={(e) => {
+                      const found = addresses.find((a) => a.maDiaChi === e.target.value);
+                      if (found) applySavedAddress(found);
+                    }}
+                    className="text-[11px] px-2 py-1 border border-slate-300 rounded-lg bg-slate-50 text-slate-700 max-w-[160px]"
+                  >
+                    <option value="" disabled>Chọn từ sổ địa chỉ...</option>
+                    {addresses.map((a) => (
+                      <option key={a.maDiaChi} value={a.maDiaChi}>
+                        {a.tenNguoiNhan} ({a.quanHuyen})
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1">Tên người nhận *</label>
                 <input value={receiverName} onChange={(e) => setReceiverName(e.target.value)} placeholder="Nhập họ tên người nhận..." className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm" required />
@@ -248,6 +410,115 @@ export default function CustomerPage() {
                   Nhập mã vận đơn để xem hành trình giao hàng theo thời gian thực.
                 </div>
               )}
+            </div>
+          )}
+
+          {tab === "address" && (
+            <div className="space-y-4">
+              <div className="bg-white rounded-2xl border border-slate-200 p-4 space-y-3">
+                <h2 className="font-bold text-sm flex items-center gap-1.5">
+                  <BookUser className="w-4 h-4 text-[#FF5722]" /> Sổ địa chỉ người nhận
+                </h2>
+                {addresses.length === 0 ? (
+                  <div className="text-xs text-slate-400">Chưa có địa chỉ nào được lưu.</div>
+                ) : (
+                  <div className="space-y-2">
+                    {addresses.map((a) => (
+                      <div key={a.maDiaChi} className="p-2.5 rounded-xl border border-slate-200 bg-slate-50 flex items-start justify-between gap-2 text-xs">
+                        <div>
+                          <div className="font-semibold text-[#0F172A]">
+                            {a.tenNguoiNhan} · {a.soDienThoai}
+                          </div>
+                          <div className="text-slate-600">{a.diaChiChiTiet}, {a.phuongXa}, {a.quanHuyen}</div>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => applySavedAddress(a)}
+                            className="px-2 py-1 bg-[#FF5722] text-white rounded-lg text-[11px] font-semibold"
+                          >
+                            Dùng
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteAddress(a.maDiaChi)}
+                            className="p-1 text-slate-400 hover:text-red-600"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <form onSubmit={handleAddAddress} className="pt-2 border-t border-slate-100 space-y-2">
+                  <div className="text-xs font-semibold text-slate-700">Thêm địa chỉ mới</div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <input value={newAddrName} onChange={(e) => setNewAddrName(e.target.value)} placeholder="Tên người nhận" className="px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs" required />
+                    <input value={newAddrPhone} onChange={(e) => setNewAddrPhone(e.target.value)} placeholder="Số điện thoại" className="px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs" required />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <select
+                      value={newAddrDistrict}
+                      onChange={(e) => {
+                        const d = e.target.value;
+                        setNewAddrDistrict(d);
+                        setNewAddrWard((HCM_DISTRICTS[d] || [])[0] || "");
+                      }}
+                      className="px-2 py-1.5 border border-slate-300 rounded-lg text-xs bg-white"
+                    >
+                      {DISTRICT_NAMES.map((d) => <option key={d} value={d}>{d}</option>)}
+                    </select>
+                    <select value={newAddrWard} onChange={(e) => setNewAddrWard(e.target.value)} className="px-2 py-1.5 border border-slate-300 rounded-lg text-xs bg-white">
+                      {(HCM_DISTRICTS[newAddrDistrict] || []).map((w) => <option key={w} value={w}>{w}</option>)}
+                    </select>
+                  </div>
+                  <input value={newAddrDetail} onChange={(e) => setNewAddrDetail(e.target.value)} placeholder="Số nhà, tên đường..." className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs" required />
+                  <button type="submit" className="w-full py-2 bg-[#0F172A] text-white rounded-xl text-xs font-semibold">
+                    Lưu vào sổ địa chỉ
+                  </button>
+                </form>
+              </div>
+
+              <div className="bg-white rounded-2xl border border-slate-200 p-4 space-y-3">
+                <h2 className="font-bold text-sm flex items-center gap-1.5">
+                  <Landmark className="w-4 h-4 text-[#FF5722]" /> Tài khoản ngân hàng nhận COD
+                </h2>
+                {bankAccounts.length === 0 ? (
+                  <div className="text-xs text-slate-400">Chưa có tài khoản ngân hàng nào.</div>
+                ) : (
+                  <div className="space-y-2">
+                    {bankAccounts.map((acc) => {
+                      const bank = banks.find((b) => b.maNganHangDm === acc.maNganHangDm);
+                      return (
+                        <div key={acc.maTkNganHang} className="p-2.5 rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-between text-xs">
+                          <div>
+                            <div className="font-semibold text-[#0F172A]">{bank ? bank.tenVietTat : acc.maNganHangDm} · {acc.soTaiKhoan}</div>
+                            <div className="text-slate-500">{acc.tenChuTaiKhoan}</div>
+                          </div>
+                          <button type="button" onClick={() => handleDeleteBank(acc.maTkNganHang)} className="p-1 text-slate-400 hover:text-red-600">
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                <form onSubmit={handleAddBank} className="pt-2 border-t border-slate-100 space-y-2">
+                  <select value={newBankId} onChange={(e) => setNewBankId(e.target.value)} className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs bg-white">
+                    {banks.map((b) => <option key={b.maNganHangDm} value={b.maNganHangDm}>{b.tenVietTat} - {b.tenNganHang}</option>)}
+                  </select>
+                  <div className="grid grid-cols-2 gap-2">
+                    <input value={newBankAcc} onChange={(e) => setNewBankAcc(e.target.value)} placeholder="Số tài khoản" className="px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs" required />
+                    <input value={newBankOwner} onChange={(e) => setNewBankOwner(e.target.value)} placeholder="Tên chủ TK" className="px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs" required />
+                  </div>
+                  <button type="submit" className="w-full py-2 bg-[#0F172A] text-white rounded-xl text-xs font-semibold">
+                    Thêm tài khoản nhận COD
+                  </button>
+                </form>
+              </div>
             </div>
           )}
         </div>
