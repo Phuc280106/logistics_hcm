@@ -21,6 +21,9 @@ public class DonHangController {
     private final LichHenGiaoLaiRepository lichHenRepo;
     private final ChiTietTieuTuyenRepository ctTieuTuyenRepo;
     private final TieuTuyenRepository tieuTuyenRepo;
+    private final ThamSoRepository thamSoRepo;
+    private final BangGiaCuocRepository bangGiaRepo;
+    private final ChiTietBangGiaRepository ctBangGiaRepo;
 
     public DonHangController(
             DonHangRepository donHangRepo,
@@ -29,7 +32,10 @@ public class DonHangController {
             GiaoDichVietQrRepository qrRepo,
             LichHenGiaoLaiRepository lichHenRepo,
             ChiTietTieuTuyenRepository ctTieuTuyenRepo,
-            TieuTuyenRepository tieuTuyenRepo) {
+            TieuTuyenRepository tieuTuyenRepo,
+            ThamSoRepository thamSoRepo,
+            BangGiaCuocRepository bangGiaRepo,
+            ChiTietBangGiaRepository ctBangGiaRepo) {
         this.donHangRepo = donHangRepo;
         this.lichSuRepo = lichSuRepo;
         this.podRepo = podRepo;
@@ -37,6 +43,9 @@ public class DonHangController {
         this.lichHenRepo = lichHenRepo;
         this.ctTieuTuyenRepo = ctTieuTuyenRepo;
         this.tieuTuyenRepo = tieuTuyenRepo;
+        this.thamSoRepo = thamSoRepo;
+        this.bangGiaRepo = bangGiaRepo;
+        this.ctBangGiaRepo = ctBangGiaRepo;
     }
 
     public record FeeCalcRequest(
@@ -94,23 +103,46 @@ public class DonHangController {
 
     @PostMapping("/tinh-cuoc")
     public Map<String, Object> calculateFee(@RequestBody FeeCalcRequest req) {
+        double heSoQuyDoi = thamSoRepo.findById("TS_HESO_QUYDOI")
+                .map(ts -> Double.parseDouble(ts.getGiaTri()))
+                .orElse(6000.0);
+
         double weight = req.trongLuongThuc() != null ? req.trongLuongThuc() : 0.5;
         double d = req.chieuDai() != null ? req.chieuDai() : 0;
         double r = req.chieuRong() != null ? req.chieuRong() : 0;
         double c = req.chieuCao() != null ? req.chieuCao() : 0;
-        double volWeight = (d * r * c) / 6000.0;
+        double volWeight = (d * r * c) / heSoQuyDoi;
         double chargeableWeight = Math.max(weight, volWeight);
 
-        boolean hoaToc = "GDV_HOATOC".equals(req.maGoiDichVu());
-        BigDecimal cuocSan = hoaToc ? BigDecimal.valueOf(35000) : BigDecimal.valueOf(20000);
-        BigDecimal donGiaVuot = hoaToc ? BigDecimal.valueOf(15000) : BigDecimal.valueOf(10000);
+        String maGoi = req.maGoiDichVu() != null ? req.maGoiDichVu() : "GDV_TIEUCHUAN";
+        boolean hoaToc = "GDV_HOATOC".equals(maGoi);
 
-        double vuotKg = Math.max(0, chargeableWeight - 1.0);
+        BigDecimal cuocSan = hoaToc ? BigDecimal.valueOf(35000) : BigDecimal.valueOf(20000);
+        double khoiLuongSan = 1.0;
+        BigDecimal donGiaVuot = hoaToc ? BigDecimal.valueOf(15000) : BigDecimal.valueOf(10000);
+        BigDecimal phuPhiDeVo = BigDecimal.valueOf(3000);
+        double tyLeCod = 0.01;
+
+        Optional<BangGiaCuoc> bgOpt = bangGiaRepo.findFirstByDangKichHoatTrueOrderByNgayHieuLucDesc();
+        if (bgOpt.isPresent()) {
+            Optional<ChiTietBangGia> ctOpt = ctBangGiaRepo.findById(
+                    new ChiTietBangGiaId(bgOpt.get().getMaBangGia(), "VT_NOITINH", maGoi));
+            if (ctOpt.isPresent()) {
+                ChiTietBangGia ct = ctOpt.get();
+                cuocSan = ct.getCuocSan();
+                khoiLuongSan = ct.getKhoiLuongSanKg();
+                donGiaVuot = ct.getDonGiaVuotMoiKg();
+                phuPhiDeVo = ct.getPhuPhiDeVo();
+                tyLeCod = ct.getTyLePhiCod();
+            }
+        }
+
+        double vuotKg = Math.max(0, chargeableWeight - khoiLuongSan);
         BigDecimal cuocVuotCan = donGiaVuot.multiply(BigDecimal.valueOf(Math.ceil(vuotKg * 2) / 2.0))
                 .setScale(0, RoundingMode.HALF_UP);
-        BigDecimal phuPhi = Boolean.TRUE.equals(req.laHangDeVo()) ? BigDecimal.valueOf(3000) : BigDecimal.ZERO;
+        BigDecimal phuPhi = Boolean.TRUE.equals(req.laHangDeVo()) ? phuPhiDeVo : BigDecimal.ZERO;
         BigDecimal cod = req.tienCod() != null ? req.tienCod() : BigDecimal.ZERO;
-        BigDecimal phiCod = cod.multiply(BigDecimal.valueOf(0.01)).setScale(0, RoundingMode.HALF_UP);
+        BigDecimal phiCod = cod.multiply(BigDecimal.valueOf(tyLeCod)).setScale(0, RoundingMode.HALF_UP);
         BigDecimal tongCuoc = cuocSan.add(cuocVuotCan).add(phuPhi).add(phiCod);
 
         return Map.of(
@@ -187,6 +219,21 @@ public class DonHangController {
             qr.setSoTien(dh.getTongCuoc());
             qr.setNoiDungChuyenKhoan("FASTPOST " + maVanDon);
             qr.setTrangThai("ChoThanhToan");
+            qrRepo.save(qr);
+            String qrUrl = "https://img.vietqr.io/image/VCB-0071001234567-compact2.png?amount="
+                    + dh.getTongCuoc().longValue()
+                    + "&addInfo=" + ("FASTPOST+" + maVanDon);
+            return ResponseEntity.ok(Map.of("giaoDich", qr, "qrUrl", qrUrl));
+        }).orElse(ResponseEntity.notFound().build());
+    }
+
+    @PostMapping("/vietqr/{maGiaoDichQr}/xac-nhan")
+    @Transactional
+    public ResponseEntity<?> confirmVietQr(@PathVariable String maGiaoDichQr) {
+        return qrRepo.findById(maGiaoDichQr).map(qr -> {
+            qr.setTrangThai("DaThanhToan");
+            qr.setThoiGianXacNhan(LocalDateTime.now());
+            qr.setMaGiaoDichNganHang("VCB" + System.currentTimeMillis());
             qrRepo.save(qr);
             return ResponseEntity.ok(qr);
         }).orElse(ResponseEntity.notFound().build());
