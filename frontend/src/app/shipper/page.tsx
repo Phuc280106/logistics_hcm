@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Zap, MapPin, Phone, CheckCircle2, XCircle, Package, Wallet, User, LogOut, Navigation } from "lucide-react";
+import { Zap, MapPin, Phone, CheckCircle2, XCircle, Package, Wallet, User, LogOut, Navigation, ClipboardCheck } from "lucide-react";
 import { apiFetch, formatVnd, UserSession } from "@/lib/api";
 
 interface DonHangItem {
@@ -15,6 +15,14 @@ interface DonHangItem {
   maGoiDichVu: string;
   tienCod: number;
   trangThai: string;
+  soLanGiaoThatBai?: number;
+}
+
+interface PhieuXuatItem {
+  maPhieuXuat: string;
+  tongSoDon: number;
+  tongTienCodPhaiThu: number;
+  shipperDaXacNhan: boolean;
 }
 
 const DEMO_ORDERS: DonHangItem[] = [
@@ -28,6 +36,7 @@ const DEMO_ORDERS: DonHangItem[] = [
     maGoiDichVu: "GDV_HOATOC",
     tienCod: 450000,
     trangThai: "DangGiaoHang",
+    soLanGiaoThatBai: 0,
   },
   {
     maVanDon: "FP-98232",
@@ -39,6 +48,7 @@ const DEMO_ORDERS: DonHangItem[] = [
     maGoiDichVu: "GDV_TIEUCHUAN",
     tienCod: 0,
     trangThai: "SanSangGiao",
+    soLanGiaoThatBai: 0,
   },
 ];
 
@@ -46,12 +56,17 @@ export default function ShipperPage() {
   const router = useRouter();
   const [user, setUser] = useState<UserSession | null>(null);
   const [orders, setOrders] = useState<DonHangItem[]>(DEMO_ORDERS);
+  const [phieuXuatList, setPhieuXuatList] = useState<PhieuXuatItem[]>([
+    { maPhieuXuat: "PXK-10234", tongSoDon: 2, tongTienCodPhaiThu: 450000, shipperDaXacNhan: false },
+  ]);
   const [tab, setTab] = useState<"deliver" | "pickup" | "done">("deliver");
   const [online, setOnline] = useState(true);
   const [selected, setSelected] = useState<DonHangItem | null>(null);
   const [modalMode, setModalMode] = useState<"detail" | "pod" | "fail" | null>(null);
   const [receiverName, setReceiverName] = useState("");
   const [failReason, setFailReason] = useState("Khách không nghe máy");
+  const [rescheduleDate, setRescheduleDate] = useState("2026-11-17T09:00");
+  const [failNote, setFailNote] = useState("Khách hẹn sáng mai giao lại tại cổng sau");
   const [codWallet, setCodWallet] = useState(1250000);
 
   useEffect(() => {
@@ -62,15 +77,32 @@ export default function ShipperPage() {
     }
     const parsed = JSON.parse(raw) as UserSession;
     setUser(parsed);
+    const shipperId = parsed.maNhanVien || "NV_SHIP_01";
 
-    apiFetch<DonHangItem[]>(`/don-hang?shipper=${parsed.maNhanVien || "NV_SHIP_01"}`)
+    apiFetch<DonHangItem[]>(`/don-hang?shipper=${shipperId}`)
       .then((data) => { if (data.length > 0) setOrders(data); })
       .catch(() => {});
 
-    apiFetch<{ tongNoLuyKe: number }>(`/doi-soat/vi-cong-no/${parsed.maNhanVien || "NV_SHIP_01"}`)
+    apiFetch<PhieuXuatItem[]>(`/kho/phieu-xuat?maShipper=${shipperId}`)
+      .then((px) => { if (px.length > 0) setPhieuXuatList(px); })
+      .catch(() => {});
+
+    apiFetch<{ tongNoLuyKe: number }>(`/doi-soat/vi-cong-no/${shipperId}`)
       .then((vi) => setCodWallet(Number(vi.tongNoLuyKe)))
       .catch(() => {});
   }, [router]);
+
+  async function handleConfirmPhieuXuat(maPhieuXuat: string) {
+    try {
+      await apiFetch(`/kho/phieu-xuat/${maPhieuXuat}/xac-nhan`, { method: "POST" });
+    } catch {}
+    setPhieuXuatList((prev) =>
+      prev.map((p) => (p.maPhieuXuat === maPhieuXuat ? { ...p, shipperDaXacNhan: true } : p))
+    );
+    setOrders((prev) =>
+      prev.map((o) => (o.trangThai === "SanSangGiao" ? { ...o, trangThai: "DangGiaoHang" } : o))
+    );
+  }
 
   async function handleConfirmPod() {
     if (!selected) return;
@@ -100,19 +132,24 @@ export default function ShipperPage() {
         method: "POST",
         body: JSON.stringify({
           lyDoThatBai: failReason,
+          ngayHenGiaoLai: rescheduleDate ? `${rescheduleDate}:00` : null,
+          ghiChu: failNote,
           maNhanVien: user?.maNhanVien || "NV_SHIP_01",
         }),
       });
     } catch {}
+    const nextFails = (selected.soLanGiaoThatBai || 0) + 1;
+    const nextState = nextFails >= 3 ? "ChoChuyenHoan" : "ChoGiaoLai";
     setOrders((prev) =>
-      prev.map((o) => (o.maVanDon === selected.maVanDon ? { ...o, trangThai: "ChoGiaoLai" } : o))
+      prev.map((o) => (o.maVanDon === selected.maVanDon ? { ...o, trangThai: nextState, soLanGiaoThatBai: nextFails } : o))
     );
     setModalMode(null);
     setSelected(null);
   }
 
+  const pendingPhieuXuat = phieuXuatList.filter((p) => !p.shipperDaXacNhan);
   const activeDeliver = orders.filter((o) => o.trangThai === "DangGiaoHang" || o.trangThai === "SanSangGiao");
-  const doneOrders = orders.filter((o) => o.trangThai === "DaGiaoThanhCong" || o.trangThai === "ChoGiaoLai");
+  const doneOrders = orders.filter((o) => o.trangThai === "DaGiaoThanhCong" || o.trangThai === "ChoGiaoLai" || o.trangThai === "ChoChuyenHoan");
   const listToShow = tab === "deliver" ? activeDeliver : tab === "done" ? doneOrders : [];
   const pct = Math.min(100, Math.round((codWallet / 3000000) * 100));
 
@@ -156,6 +193,24 @@ export default function ShipperPage() {
         </header>
 
         <main className="flex-1 p-4 space-y-4 overflow-y-auto pb-24">
+          {/* Pending Dispatch Handover Banner */}
+          {pendingPhieuXuat.map((px) => (
+            <div key={px.maPhieuXuat} className="bg-orange-50 border border-[#FF5722]/40 rounded-2xl p-3.5 flex items-center justify-between">
+              <div className="text-xs">
+                <div className="font-bold text-[#0F172A] flex items-center gap-1.5">
+                  <ClipboardCheck className="w-4 h-4 text-[#FF5722]" /> Phiếu xuất kho {px.maPhieuXuat}
+                </div>
+                <div className="text-slate-600">{px.tongSoDon} đơn · COD: {formatVnd(px.tongTienCodPhaiThu)}</div>
+              </div>
+              <button
+                onClick={() => handleConfirmPhieuXuat(px.maPhieuXuat)}
+                className="px-3 py-1.5 bg-[#FF5722] text-white text-xs font-semibold rounded-xl shrink-0"
+              >
+                Xác nhận nhận hàng
+              </button>
+            </div>
+          ))}
+
           {/* Dark Navy Summary Card */}
           <div className="bg-gradient-to-br from-[#0F172A] to-[#1E293B] text-white rounded-2xl p-4 shadow-md">
             <div className="text-sm font-semibold text-slate-200 mb-3">
@@ -275,7 +330,7 @@ export default function ShipperPage() {
           </div>
         </nav>
 
-        {/* Modal for Order Detail / POD / Fail */}
+        {/* Modal for Order Detail / POD / Fail + Reschedule */}
         {selected && modalMode && (
           <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50 p-4">
             <div className="bg-white w-full max-w-[400px] rounded-2xl p-5 space-y-4">
@@ -283,7 +338,7 @@ export default function ShipperPage() {
                 <h3 className="font-bold text-lg">
                   {modalMode === "detail" && `Chi tiết #${selected.maVanDon}`}
                   {modalMode === "pod" && `Xác thực giao hàng (POD)`}
-                  {modalMode === "fail" && `Báo giao thất bại`}
+                  {modalMode === "fail" && `Báo giao thất bại & Hẹn giao lại`}
                 </h3>
                 <button onClick={() => setModalMode(null)} className="text-slate-400 hover:text-slate-700 text-sm">Đóng</button>
               </div>
@@ -350,11 +405,29 @@ export default function ShipperPage() {
                       <option>Sai địa chỉ / Khách từ chối nhận</option>
                     </select>
                   </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">Ngày giờ hẹn giao lại (lich_hen_giao_lai)</label>
+                    <input
+                      type="datetime-local"
+                      value={rescheduleDate}
+                      onChange={(e) => setRescheduleDate(e.target.value)}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">Ghi chú lịch hẹn</label>
+                    <input
+                      type="text"
+                      value={failNote}
+                      onChange={(e) => setFailNote(e.target.value)}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm"
+                    />
+                  </div>
                   <button
                     onClick={handleReportFail}
                     className="w-full py-2.5 bg-red-600 text-white font-semibold rounded-xl text-sm"
                   >
-                    Lưu báo cáo thất bại
+                    Lưu lịch hẹn giao lại / Báo thất bại
                   </button>
                 </>
               )}
