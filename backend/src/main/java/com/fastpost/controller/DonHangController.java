@@ -25,6 +25,8 @@ public class DonHangController {
     private final BangGiaCuocRepository bangGiaRepo;
     private final ChiTietBangGiaRepository ctBangGiaRepo;
     private final NhatKyInTemRepository nhatKyInTemRepo;
+    private final ViCongNoShipperRepository viRepo;
+    private final ShipperRepository shipperRepo;
 
     public DonHangController(
             DonHangRepository donHangRepo,
@@ -37,7 +39,9 @@ public class DonHangController {
             ThamSoRepository thamSoRepo,
             BangGiaCuocRepository bangGiaRepo,
             ChiTietBangGiaRepository ctBangGiaRepo,
-            NhatKyInTemRepository nhatKyInTemRepo) {
+            NhatKyInTemRepository nhatKyInTemRepo,
+            ViCongNoShipperRepository viRepo,
+            ShipperRepository shipperRepo) {
         this.donHangRepo = donHangRepo;
         this.lichSuRepo = lichSuRepo;
         this.podRepo = podRepo;
@@ -49,6 +53,8 @@ public class DonHangController {
         this.bangGiaRepo = bangGiaRepo;
         this.ctBangGiaRepo = ctBangGiaRepo;
         this.nhatKyInTemRepo = nhatKyInTemRepo;
+        this.viRepo = viRepo;
+        this.shipperRepo = shipperRepo;
     }
 
     public record FeeCalcRequest(
@@ -259,6 +265,59 @@ public class DonHangController {
 
             addHistory(maVanDon, dh.getMaBuuCucHienTai(), req.maNhanVien(), "DaGiaoThanhCong",
                     "Giao hàng thành công cho " + pod.getTenNguoiKy());
+
+            if (dh.getTienCod() != null && dh.getTienCod().compareTo(BigDecimal.ZERO) > 0) {
+                String shipperId = req.maNhanVien() != null ? req.maNhanVien() : dh.getMaShipper();
+                if (shipperId != null) {
+                    BigDecimal debtLimit = thamSoRepo.findById("HAN_MUC_NO_SHIPPER")
+                            .map(t -> new BigDecimal(t.getGiaTri()))
+                            .orElse(BigDecimal.valueOf(3_000_000));
+                    viRepo.findByMaShipper(shipperId).ifPresent(vi -> {
+                        if (vi.getTongNoLuyKe().compareTo(BigDecimal.ZERO) == 0) {
+                            vi.setThoiDiemPhatSinhNo(LocalDateTime.now());
+                        }
+                        BigDecimal newDebt = vi.getTongNoLuyKe().add(dh.getTienCod());
+                        vi.setTongNoLuyKe(newDebt);
+                        if (newDebt.compareTo(debtLimit) >= 0) {
+                            vi.setDaKhoaNhanDon(true);
+                            shipperRepo.findById(shipperId).ifPresent(s -> {
+                                s.setTrangThaiNhanDon("KhoaTamThoi");
+                                shipperRepo.save(s);
+                            });
+                        }
+                        viRepo.save(vi);
+                    });
+                }
+            }
+            return ResponseEntity.ok(dh);
+        }).orElse(ResponseEntity.notFound().build());
+    }
+
+    @PostMapping("/{maVanDon}/lay-hang")
+    @Transactional
+    public ResponseEntity<?> confirmPickup(@PathVariable String maVanDon, @RequestBody(required = false) Map<String, String> body) {
+        return donHangRepo.findById(maVanDon).map(dh -> {
+            String shipperId = body != null && body.get("maNhanVien") != null ? body.get("maNhanVien") : dh.getMaShipper();
+            dh.setTrangThai("DaLayHang");
+            if (shipperId != null) dh.setMaShipper(shipperId);
+            donHangRepo.save(dh);
+            addHistory(maVanDon, dh.getMaBuuCucHienTai(), shipperId != null ? shipperId : "NV_SHIP_01", "DaLayHang",
+                    "Shipper đã lấy hàng từ người gửi");
+            return ResponseEntity.ok(dh);
+        }).orElse(ResponseEntity.notFound().build());
+    }
+
+    @PostMapping("/{maVanDon}/nhap-kho")
+    @Transactional
+    public ResponseEntity<?> receiveToWarehouse(@PathVariable String maVanDon, @RequestBody(required = false) Map<String, String> body) {
+        return donHangRepo.findById(maVanDon).map(dh -> {
+            String buuCuc = body != null && body.get("maBuuCuc") != null ? body.get("maBuuCuc") : dh.getMaBuuCucHienTai();
+            String nv = body != null && body.get("maNhanVien") != null ? body.get("maNhanVien") : "NV_QUAY_01";
+            dh.setTrangThai("DaNhapKho");
+            if (buuCuc != null) dh.setMaBuuCucHienTai(buuCuc);
+            donHangRepo.save(dh);
+            addHistory(maVanDon, buuCuc, nv, "DaNhapKho",
+                    "Đơn hàng đã nhập kho bưu cục " + buuCuc);
             return ResponseEntity.ok(dh);
         }).orElse(ResponseEntity.notFound().build());
     }

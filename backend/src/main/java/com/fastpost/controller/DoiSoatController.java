@@ -20,18 +20,21 @@ public class DoiSoatController {
     private final ShipperRepository shipperRepo;
     private final BienBanChotQuyRepository chotQuyRepo;
     private final DanhGiaKpiRepository kpiRepo;
+    private final BuuCucRepository buuCucRepo;
 
     public DoiSoatController(
             PhieuDoiSoatShipperRepository phieuRepo,
             ViCongNoShipperRepository viRepo,
             ShipperRepository shipperRepo,
             BienBanChotQuyRepository chotQuyRepo,
-            DanhGiaKpiRepository kpiRepo) {
+            DanhGiaKpiRepository kpiRepo,
+            BuuCucRepository buuCucRepo) {
         this.phieuRepo = phieuRepo;
         this.viRepo = viRepo;
         this.shipperRepo = shipperRepo;
         this.chotQuyRepo = chotQuyRepo;
         this.kpiRepo = kpiRepo;
+        this.buuCucRepo = buuCucRepo;
     }
 
     public record CreateDoiSoatRequest(String maShipper, String maNhanVienQuay, Integer tongDonThanhCong, BigDecimal tongTienCod, BigDecimal tongCuocMat) {}
@@ -180,7 +183,14 @@ public class DoiSoatController {
         bb.setChenhLech(thucKe.subtract(soSach));
         bb.setLyDoChenhLech(req.lyDoChenhLech());
         bb.setDaKhoaSo(true);
-        return chotQuyRepo.save(bb);
+        BienBanChotQuy saved = chotQuyRepo.save(bb);
+
+        buuCucRepo.findById(bb.getMaBuuCuc()).ifPresent(bc -> {
+            BigDecimal current = bc.getSoDuQuyKet() != null ? bc.getSoDuQuyKet() : BigDecimal.ZERO;
+            bc.setSoDuQuyKet(current.add(thucKe));
+            buuCucRepo.save(bc);
+        });
+        return saved;
     }
 
     @GetMapping("/bao-cao-sla")
