@@ -24,6 +24,7 @@ public class DonHangController {
     private final ThamSoRepository thamSoRepo;
     private final BangGiaCuocRepository bangGiaRepo;
     private final ChiTietBangGiaRepository ctBangGiaRepo;
+    private final NhatKyInTemRepository nhatKyInTemRepo;
 
     public DonHangController(
             DonHangRepository donHangRepo,
@@ -35,7 +36,8 @@ public class DonHangController {
             TieuTuyenRepository tieuTuyenRepo,
             ThamSoRepository thamSoRepo,
             BangGiaCuocRepository bangGiaRepo,
-            ChiTietBangGiaRepository ctBangGiaRepo) {
+            ChiTietBangGiaRepository ctBangGiaRepo,
+            NhatKyInTemRepository nhatKyInTemRepo) {
         this.donHangRepo = donHangRepo;
         this.lichSuRepo = lichSuRepo;
         this.podRepo = podRepo;
@@ -46,6 +48,7 @@ public class DonHangController {
         this.thamSoRepo = thamSoRepo;
         this.bangGiaRepo = bangGiaRepo;
         this.ctBangGiaRepo = ctBangGiaRepo;
+        this.nhatKyInTemRepo = nhatKyInTemRepo;
     }
 
     public record FeeCalcRequest(
@@ -303,6 +306,35 @@ public class DonHangController {
                     "Đã hoàn trả đơn hàng về cho người gửi thành công");
             return ResponseEntity.ok(dh);
         }).orElse(ResponseEntity.notFound().build());
+    }
+
+    public record InTemRequest(String maNhanVienQuay, String loaiIn, String lyDoInLai) {}
+
+    @GetMapping("/in-tem/nhat-ky")
+    public List<NhatKyInTem> listRecentInTem() {
+        return nhatKyInTemRepo.findTop20ByOrderByThoiGianInDesc();
+    }
+
+    @GetMapping("/{maVanDon}/in-tem")
+    public List<NhatKyInTem> listInTemByOrder(@PathVariable String maVanDon) {
+        return nhatKyInTemRepo.findByMaVanDonOrderByThoiGianInDesc(maVanDon);
+    }
+
+    @PostMapping("/{maVanDon}/in-tem")
+    public ResponseEntity<?> logInTem(@PathVariable String maVanDon, @RequestBody(required = false) InTemRequest req) {
+        if (!donHangRepo.existsById(maVanDon)) {
+            return ResponseEntity.badRequest().body(Map.of("message", "Không tìm thấy vận đơn " + maVanDon));
+        }
+        long existingCount = nhatKyInTemRepo.countByMaVanDon(maVanDon);
+        NhatKyInTem log = new NhatKyInTem();
+        log.setMaNhatKy("IN-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase());
+        log.setMaVanDon(maVanDon);
+        log.setMaNhanVienQuay(req != null && req.maNhanVienQuay() != null ? req.maNhanVienQuay() : "NV_QUAY_01");
+        log.setThoiGianIn(LocalDateTime.now());
+        log.setSoLanIn((int) existingCount + 1);
+        log.setLoaiIn(req != null && req.loaiIn() != null ? req.loaiIn() : (existingCount == 0 ? "IN_MOI" : "IN_LAI"));
+        log.setLyDoInLai(req != null ? req.lyDoInLai() : null);
+        return ResponseEntity.ok(nhatKyInTemRepo.save(log));
     }
 
     private void addHistory(String maVanDon, String maBuuCuc, String maNv, String trangThai, String moTa) {
