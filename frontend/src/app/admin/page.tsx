@@ -116,8 +116,14 @@ export default function AdminPage() {
   const [returnOrders, setReturnOrders] = useState<{ maVanDon: string; nguoiNhanTen: string; soLanGiaoThatBai: number; trangThai: string }[]>([]);
 
   // 3. Finance & SLA
+  const [financeTab, setFinanceTab] = useState<"shipper" | "shop" | "pricing">("shipper");
   const [slips, setSlips] = useState<PhieuDoiSoatItem[]>([]);
   const [actualCash, setActualCash] = useState<Record<string, number>>({});
+  const [kyList, setKyList] = useState<{ maKy: string; loaiKyThanhToan: string; trangThai: string }[]>([]);
+  const [bangKeList, setBangKeList] = useState<{ maBangKe: string; maKhachHang: string; tongCod: number; tongCuocTru: number; thucTra: number; trangThaiThanhToan: string }[]>([]);
+  const [thamSoList, setThamSoList] = useState<{ maThamSo: string; tenThamSo: string; giaTri: string }[]>([]);
+  const [chiTietGia, setChiTietGia] = useState<{ maBangGia: string; maVungTuyen: string; maGoiDichVu: string; cuocSan: number; donGiaVuotMoiKg: number; phuPhiDeVo: number; tyLePhiCod: number }[]>([]);
+  const [baoCaoList, setBaoCaoList] = useState<{ maBaoCao: string; maBuuCuc: string; doanhThuCuoc: number; tienCodTrungChuyen: number; tongSanLuongDon: number; tyLeTienMat: number; tyLeVietQr: number }[]>([]);
   const [kpiList, setKpiList] = useState<KpiItem[]>([]);
 
   useEffect(() => {
@@ -138,6 +144,15 @@ export default function AdminPage() {
     apiFetch<{ tieuTuyenList: TieuTuyenItem[] }>("/kho/tuyen").then((d) => setSubRoutes(d.tieuTuyenList || [])).catch(() => {});
     apiFetch<{ maVanDon: string; nguoiNhanTen: string; soLanGiaoThatBai: number; trangThai: string }[]>("/don-hang?status=ChoChuyenHoan").then(setReturnOrders).catch(() => {});
     apiFetch<PhieuDoiSoatItem[]>("/doi-soat/shipper").then(setSlips).catch(() => {});
+    apiFetch<{ maKy: string; loaiKyThanhToan: string; trangThai: string }[]>("/tai-chinh/ky-quyet-toan").then((kys) => {
+      setKyList(kys);
+      if (kys.length > 0) {
+        apiFetch<typeof bangKeList>(`/tai-chinh/ky-quyet-toan/${kys[0].maKy}/bang-ke`).then(setBangKeList).catch(() => {});
+      }
+    }).catch(() => {});
+    apiFetch<{ maThamSo: string; tenThamSo: string; giaTri: string }[]>("/tai-chinh/tham-so").then(setThamSoList).catch(() => {});
+    apiFetch<{ chiTiet: typeof chiTietGia }>("/tai-chinh/bang-gia").then((d) => setChiTietGia(d.chiTiet || [])).catch(() => {});
+    apiFetch<typeof baoCaoList>("/tai-chinh/bao-cao-doanh-thu").then(setBaoCaoList).catch(() => {});
     apiFetch<{ kpiList: KpiItem[] }>("/doi-soat/bao-cao-sla").then((d) => setKpiList(d.kpiList || [])).catch(() => {});
   }, [router]);
 
@@ -823,64 +838,237 @@ export default function AdminPage() {
 
           {section === "finance" && (
             <div className="space-y-5">
-              <div>
-                <h1 className="text-2xl font-bold">Tài chính &amp; Đối soát COD Shipper</h1>
-                <p className="text-sm text-slate-500">Kiểm đếm tiền nộp cuối ca, ghi nhận ví công nợ và khóa sổ phiếu đối soát.</p>
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div>
+                  <h1 className="text-2xl font-bold">Tài chính, Đối soát &amp; Bảng giá</h1>
+                  <p className="text-sm text-slate-500">Đối soát COD Shipper, quyết toán COD cho Shop và cấu hình bảng giá động.</p>
+                </div>
+                <div className="flex bg-slate-200/70 p-1 rounded-xl text-xs font-semibold">
+                  <button onClick={() => setFinanceTab("shipper")} className={`px-3 py-2 rounded-lg ${financeTab === "shipper" ? "bg-[#FF5722] text-white" : "text-slate-600"}`}>Đối soát Shipper</button>
+                  <button onClick={() => setFinanceTab("shop")} className={`px-3 py-2 rounded-lg ${financeTab === "shop" ? "bg-[#FF5722] text-white" : "text-slate-600"}`}>Quyết toán Shop</button>
+                  <button onClick={() => setFinanceTab("pricing")} className={`px-3 py-2 rounded-lg ${financeTab === "pricing" ? "bg-[#FF5722] text-white" : "text-slate-600"}`}>Bảng giá &amp; Tham số</button>
+                </div>
               </div>
-              <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
-                {slips.length === 0 ? (
-                  <div className="p-8 text-center text-sm text-slate-400">Chưa có phiếu đối soát nào.</div>
-                ) : (
-                  <table className="w-full text-sm text-left">
-                    <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
-                      <tr>
-                        <th className="px-4 py-3">Mã phiếu</th>
-                        <th className="px-4 py-3">Shipper</th>
-                        <th className="px-4 py-3">Phải nộp</th>
-                        <th className="px-4 py-3">Thực nộp</th>
-                        <th className="px-4 py-3">Còn thiếu</th>
-                        <th className="px-4 py-3">Trạng thái</th>
-                        <th className="px-4 py-3">Đối soát</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {slips.map((s) => (
-                        <tr key={s.maDoiSoat}>
-                          <td className="px-4 py-3 font-semibold">{s.maDoiSoat}</td>
-                          <td className="px-4 py-3">{s.maShipper}</td>
-                          <td className="px-4 py-3 font-medium">{formatVnd(s.tongPhaiNop)}</td>
-                          <td className="px-4 py-3">
-                            <input
-                              type="number"
-                              defaultValue={s.soTienThucNop || s.tongPhaiNop}
-                              onChange={(e) => setActualCash({ ...actualCash, [s.maDoiSoat]: Number(e.target.value) })}
-                              className="w-32 px-2 py-1 border border-slate-300 rounded-lg text-sm"
-                            />
-                          </td>
-                          <td className="px-4 py-3 text-red-600 font-semibold">{formatVnd(s.soTienThieu)}</td>
-                          <td className="px-4 py-3">
-                            <span className="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs font-semibold">{s.trangThai}</span>
-                          </td>
-                          <td className="px-4 py-3">
-                            <button onClick={() => handleReconcile(s)} className="px-3 py-1.5 bg-[#FF5722] text-white text-xs font-semibold rounded-lg">
-                              Khớp lệnh
-                            </button>
-                          </td>
+
+              {financeTab === "shipper" && (
+                <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+                  {slips.length === 0 ? (
+                    <div className="p-8 text-center text-sm text-slate-400">Chưa có phiếu đối soát nào.</div>
+                  ) : (
+                    <table className="w-full text-sm text-left">
+                      <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
+                        <tr>
+                          <th className="px-4 py-3">Mã phiếu</th>
+                          <th className="px-4 py-3">Shipper</th>
+                          <th className="px-4 py-3">Phải nộp</th>
+                          <th className="px-4 py-3">Thực nộp</th>
+                          <th className="px-4 py-3">Còn thiếu</th>
+                          <th className="px-4 py-3">Trạng thái</th>
+                          <th className="px-4 py-3">Đối soát</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </div>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {slips.map((s) => (
+                          <tr key={s.maDoiSoat}>
+                            <td className="px-4 py-3 font-semibold">{s.maDoiSoat}</td>
+                            <td className="px-4 py-3">{s.maShipper}</td>
+                            <td className="px-4 py-3 font-medium">{formatVnd(s.tongPhaiNop)}</td>
+                            <td className="px-4 py-3">
+                              <input
+                                type="number"
+                                defaultValue={s.soTienThucNop || s.tongPhaiNop}
+                                onChange={(e) => setActualCash({ ...actualCash, [s.maDoiSoat]: Number(e.target.value) })}
+                                className="w-32 px-2 py-1 border border-slate-300 rounded-lg text-sm"
+                              />
+                            </td>
+                            <td className="px-4 py-3 text-red-600 font-semibold">{formatVnd(s.soTienThieu)}</td>
+                            <td className="px-4 py-3">
+                              <span className="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs font-semibold">{s.trangThai}</span>
+                            </td>
+                            <td className="px-4 py-3">
+                              <button onClick={() => handleReconcile(s)} className="px-3 py-1.5 bg-[#FF5722] text-white text-xs font-semibold rounded-lg">
+                                Khớp lệnh
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              )}
+
+              {financeTab === "shop" && (
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center bg-white p-4 rounded-2xl border border-slate-200">
+                    <div className="text-sm">Tổng hợp các đơn giao thành công (`DaGiaoThanhCong`) để chuyển trả COD cho Shop.</div>
+                    <button
+                      onClick={async () => {
+                        try {
+                          const res = await apiFetch<{ ky: { maKy: string; loaiKyThanhToan: string; trangThai: string }; bangKeList: typeof bangKeList }>("/tai-chinh/ky-quyet-toan", {
+                            method: "POST",
+                            body: JSON.stringify({ maQuanLyLap: user?.maNhanVien || "NV_ADMIN_01", loaiKyThanhToan: "Tuan" }),
+                          });
+                          setKyList((prev) => [res.ky, ...prev]);
+                          setBangKeList(res.bangKeList);
+                          setNotice(`Đã tạo kỳ quyết toán ${res.ky.maKy}`);
+                        } catch (err) {
+                          setErrorMsg(err instanceof Error ? err.message : "Lỗi tạo kỳ quyết toán");
+                        }
+                      }}
+                      className="px-4 py-2 bg-[#FF5722] text-white text-xs font-semibold rounded-xl shrink-0"
+                    >
+                      + Tạo kỳ quyết toán COD
+                    </button>
+                  </div>
+
+                  <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+                    <div className="p-4 border-b border-slate-100 font-bold text-sm">Bảng kê quyết toán Shop ({kyList[0]?.maKy || "Chưa có kỳ"})</div>
+                    {bangKeList.length === 0 ? (
+                      <div className="p-8 text-center text-sm text-slate-400">Chưa có bảng kê quyết toán Shop nào.</div>
+                    ) : (
+                      <table className="w-full text-sm text-left">
+                        <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
+                          <tr>
+                            <th className="px-4 py-3">Mã bảng kê</th>
+                            <th className="px-4 py-3">Khách hàng</th>
+                            <th className="px-4 py-3">Tổng COD</th>
+                            <th className="px-4 py-3">Cước khấu trừ</th>
+                            <th className="px-4 py-3">Thực trả Shop</th>
+                            <th className="px-4 py-3">Trạng thái</th>
+                            <th className="px-4 py-3">Thao tác</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {bangKeList.map((bk) => (
+                            <tr key={bk.maBangKe}>
+                              <td className="px-4 py-3 font-semibold">{bk.maBangKe}</td>
+                              <td className="px-4 py-3">{bk.maKhachHang}</td>
+                              <td className="px-4 py-3">{formatVnd(bk.tongCod)}</td>
+                              <td className="px-4 py-3 text-slate-500">{formatVnd(bk.tongCuocTru)}</td>
+                              <td className="px-4 py-3 font-bold text-[#FF5722]">{formatVnd(bk.thucTra)}</td>
+                              <td className="px-4 py-3">
+                                <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${bk.trangThaiThanhToan === "DaThanhToan" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
+                                  {bk.trangThaiThanhToan}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3">
+                                {bk.trangThaiThanhToan !== "DaThanhToan" && (
+                                  <button
+                                    onClick={async () => {
+                                      try {
+                                        const updated = await apiFetch<typeof bk>(`/tai-chinh/bang-ke/${bk.maBangKe}/thanh-toan`, {
+                                          method: "POST",
+                                          body: JSON.stringify({}),
+                                        });
+                                        setBangKeList((prev) => prev.map((x) => (x.maBangKe === bk.maBangKe ? updated : x)));
+                                        setNotice(`Đã chuyển khoản quyết toán ${bk.maBangKe}`);
+                                      } catch {}
+                                    }}
+                                    className="px-3 py-1.5 bg-slate-900 text-white text-xs font-semibold rounded-lg"
+                                  >
+                                    Xác nhận chuyển khoản
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {financeTab === "pricing" && (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  <div className="bg-white p-5 rounded-2xl border border-slate-200 space-y-3">
+                    <h2 className="font-bold text-base">Chi tiết Bảng giá cước đang áp dụng</h2>
+                    {chiTietGia.length === 0 ? (
+                      <div className="text-xs text-slate-400">Chưa tải được bảng giá từ Backend.</div>
+                    ) : (
+                      <div className="space-y-2 text-xs">
+                        {chiTietGia.map((ct) => (
+                          <div key={`${ct.maVungTuyen}-${ct.maGoiDichVu}`} className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex justify-between items-center">
+                            <div>
+                              <div className="font-bold">{ct.maVungTuyen} · {ct.maGoiDichVu}</div>
+                              <div className="text-slate-500">Sàn: {formatVnd(ct.cuocSan)} · Vượt: {formatVnd(ct.donGiaVuotMoiKg)}/kg · COD: {ct.tyLePhiCod * 100}%</div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div className="bg-white p-5 rounded-2xl border border-slate-200 space-y-3">
+                    <h2 className="font-bold text-base">Tham số hệ thống (tham_so)</h2>
+                    {thamSoList.length === 0 ? (
+                      <div className="text-xs text-slate-400">Chưa tải được tham số từ Backend.</div>
+                    ) : (
+                      <div className="space-y-2 text-xs">
+                        {thamSoList.map((ts) => (
+                          <div key={ts.maThamSo} className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex justify-between items-center gap-3">
+                            <div>
+                              <div className="font-bold">{ts.tenThamSo}</div>
+                              <div className="text-slate-400">{ts.maThamSo}</div>
+                            </div>
+                            <span className="px-2.5 py-1 rounded-lg bg-white border border-slate-300 font-mono font-bold">{ts.giaTri}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
           {section === "sla" && (
             <div className="space-y-6">
-              <div>
-                <h1 className="text-2xl font-bold">Quản trị &amp; Báo cáo SLA</h1>
-                <p className="text-sm text-slate-500">Giám sát hiệu suất giao hàng đúng hẹn và KPI đội ngũ Shipper HCM.</p>
+              <div className="flex items-center justify-between">
+                <div>
+                  <h1 className="text-2xl font-bold">Quản trị Doanh thu &amp; Báo cáo SLA</h1>
+                  <p className="text-sm text-slate-500">Tổng hợp doanh thu thực tế từ đơn hàng và giám sát KPI đội ngũ Shipper.</p>
+                </div>
+                <button
+                  onClick={async () => {
+                    try {
+                      const bc = await apiFetch<typeof baoCaoList[0]>("/tai-chinh/bao-cao-doanh-thu", {
+                        method: "POST",
+                        body: JSON.stringify({ maBuuCuc: user?.maBuuCuc || "BC_BENNGHE" }),
+                      });
+                      setBaoCaoList((prev) => [bc, ...prev]);
+                      setNotice(`Đã tổng hợp báo cáo doanh thu ${bc.maBaoCao}`);
+                    } catch (err) {
+                      setErrorMsg(err instanceof Error ? err.message : "Lỗi tổng hợp báo cáo");
+                    }
+                  }}
+                  className="px-4 py-2.5 bg-[#FF5722] text-white text-xs font-semibold rounded-xl"
+                >
+                  + Tổng hợp Báo cáo Doanh thu
+                </button>
               </div>
+
+              {baoCaoList.length > 0 && (
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <div className="bg-white p-4 rounded-2xl border border-slate-200">
+                    <div className="text-xs text-slate-500">Doanh thu cước</div>
+                    <div className="text-2xl font-bold text-[#0F172A] mt-1">{formatVnd(baoCaoList[0].doanhThuCuoc)}</div>
+                  </div>
+                  <div className="bg-white p-4 rounded-2xl border border-slate-200">
+                    <div className="text-xs text-slate-500">COD luân chuyển</div>
+                    <div className="text-2xl font-bold text-[#FF5722] mt-1">{formatVnd(baoCaoList[0].tienCodTrungChuyen)}</div>
+                  </div>
+                  <div className="bg-white p-4 rounded-2xl border border-slate-200">
+                    <div className="text-xs text-slate-500">Tổng sản lượng đơn</div>
+                    <div className="text-2xl font-bold text-[#0F172A] mt-1">{baoCaoList[0].tongSanLuongDon} đơn</div>
+                  </div>
+                  <div className="bg-white p-4 rounded-2xl border border-slate-200">
+                    <div className="text-xs text-slate-500">Tỷ lệ Tiền mặt / VietQR</div>
+                    <div className="text-lg font-bold text-[#0F172A] mt-1">{baoCaoList[0].tyLeTienMat}% / {baoCaoList[0].tyLeVietQr}%</div>
+                  </div>
+                </div>
+              )}
+
               {kpiList.length === 0 ? (
                 <div className="bg-white p-8 rounded-2xl border border-slate-200 text-center text-sm text-slate-400">
                   Chưa có dữ liệu đánh giá KPI từ Backend.
