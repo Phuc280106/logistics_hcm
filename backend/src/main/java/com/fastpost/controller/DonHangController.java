@@ -150,9 +150,8 @@ public class DonHangController {
         BigDecimal cuocVuotCan = donGiaVuot.multiply(BigDecimal.valueOf(Math.ceil(vuotKg * 2) / 2.0))
                 .setScale(0, RoundingMode.HALF_UP);
         BigDecimal phuPhi = Boolean.TRUE.equals(req.laHangDeVo()) ? phuPhiDeVo : BigDecimal.ZERO;
-        BigDecimal cod = req.tienCod() != null ? req.tienCod() : BigDecimal.ZERO;
-        BigDecimal phiCod = cod.multiply(BigDecimal.valueOf(tyLeCod)).setScale(0, RoundingMode.HALF_UP);
-        BigDecimal tongCuoc = cuocSan.add(cuocVuotCan).add(phuPhi).add(phiCod);
+        BigDecimal phiCod = BigDecimal.ZERO;
+        BigDecimal tongCuoc = cuocSan.add(cuocVuotCan).add(phuPhi);
 
         return Map.of(
                 "trongLuongTinhCuoc", Math.round(chargeableWeight * 100.0) / 100.0,

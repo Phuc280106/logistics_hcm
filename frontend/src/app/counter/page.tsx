@@ -113,7 +113,7 @@ export default function CounterPage() {
           const cuocSan = hoaToc ? 35000 : 20000;
           const vuot = Math.max(0, cw - 1) * (hoaToc ? 15000 : 10000);
           const phuPhi = fragile ? 3000 : 0;
-          const phiCod = Math.round((cod || 0) * 0.01);
+          const phiCod = 0;
           setFee({
             trongLuongTinhCuoc: Math.round(cw * 100) / 100,
             cuocSan,
@@ -477,7 +477,6 @@ export default function CounterPage() {
                     <div className="flex justify-between"><span className="text-slate-500">Cước sàn</span><span>{formatVnd(fee.cuocSan)}</span></div>
                     <div className="flex justify-between"><span className="text-slate-500">Vượt cân</span><span>{formatVnd(fee.cuocVuotCan)}</span></div>
                     <div className="flex justify-between"><span className="text-slate-500">Phụ phí</span><span>{formatVnd(fee.phuPhi)}</span></div>
-                    <div className="flex justify-between"><span className="text-slate-500">Phí dịch vụ COD (1%)</span><span>{formatVnd(fee.phiCod)}</span></div>
                   </div>
                   <div className="border-t border-slate-200 pt-3 flex items-baseline justify-between">
                     <span className="font-bold">Tổng cước</span>

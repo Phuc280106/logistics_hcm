@@ -253,8 +253,7 @@ export default function CustomerPage() {
         .catch(() => {
           const baseFee = service === "GDV_HOATOC" ? 35000 : 20000;
           const weightFee = Math.max(0, (weight || 0) - 1) * (service === "GDV_HOATOC" ? 15000 : 10000);
-          const codFee = Math.round((cod || 0) * 0.01);
-          setEstTotal(baseFee + weightFee + codFee);
+          setEstTotal(baseFee + weightFee);
         });
     }, 200);
     return () => clearTimeout(timer);
