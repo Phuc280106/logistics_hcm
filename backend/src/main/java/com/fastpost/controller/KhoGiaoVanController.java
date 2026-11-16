@@ -20,6 +20,7 @@ public class KhoGiaoVanController {
     private final TuyenGiaoHangRepository tuyenRepo;
     private final TieuTuyenRepository tieuTuyenRepo;
     private final ChiTietTieuTuyenRepository ctTieuTuyenRepo;
+    private final BuuCucRepository buuCucRepo;
 
     public KhoGiaoVanController(
             PhieuXuatKhoRepository phieuXuatRepo,
@@ -28,7 +29,8 @@ public class KhoGiaoVanController {
             LichSuHanhTrinhRepository lichSuRepo,
             TuyenGiaoHangRepository tuyenRepo,
             TieuTuyenRepository tieuTuyenRepo,
-            ChiTietTieuTuyenRepository ctTieuTuyenRepo) {
+            ChiTietTieuTuyenRepository ctTieuTuyenRepo,
+            BuuCucRepository buuCucRepo) {
         this.phieuXuatRepo = phieuXuatRepo;
         this.ctPhieuXuatRepo = ctPhieuXuatRepo;
         this.donHangRepo = donHangRepo;
@@ -36,6 +38,17 @@ public class KhoGiaoVanController {
         this.tuyenRepo = tuyenRepo;
         this.tieuTuyenRepo = tieuTuyenRepo;
         this.ctTieuTuyenRepo = ctTieuTuyenRepo;
+        this.buuCucRepo = buuCucRepo;
+    }
+
+    @GetMapping("/buu-cuc")
+    public List<BuuCuc> listBuuCuc() {
+        return buuCucRepo.findAll();
+    }
+
+    @GetMapping("/don-cho-luan-chuyen")
+    public List<DonHang> listDonChoLuanChuyen(@RequestParam String maBuuCuc) {
+        return donHangRepo.findByMaBuuCucHienTaiAndTrangThaiOrderByNgayTaoDesc(maBuuCuc, "DaNhapKho");
     }
 
     public record CreatePhieuXuatRequest(

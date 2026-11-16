@@ -53,15 +53,20 @@ public class ManifestController {
 
     @PostMapping
     @Transactional
-    public Manifest create(@RequestBody CreateManifestRequest req) {
+    public ResponseEntity<?> create(@RequestBody CreateManifestRequest req) {
+        String khoDi = req.maBuuCucDi() != null ? req.maBuuCucDi() : "KHO_Q1";
+        String khoDen = req.maBuuCucDen() != null ? req.maBuuCucDen() : "BC_BENNGHE";
+        if (khoDi.equals(khoDen)) {
+            return ResponseEntity.badRequest().body(Map.of("message", "Kho đi và Kho đến không được trùng nhau"));
+        }
         Manifest m = new Manifest();
-        m.setMaManifest("MF-Q1-" + (1000 + new Random().nextInt(8999)));
-        m.setMaBuuCucDi(req.maBuuCucDi() != null ? req.maBuuCucDi() : "KHO_Q1");
-        m.setMaBuuCucDen(req.maBuuCucDen() != null ? req.maBuuCucDen() : "BC_BENNGHE");
+        m.setMaManifest("MF-" + (1000 + new Random().nextInt(8999)));
+        m.setMaBuuCucDi(khoDi);
+        m.setMaBuuCucDen(khoDen);
         m.setMaNhanVienLap(req.maNhanVienLap() != null ? req.maNhanVienLap() : "NV_ADMIN_01");
         m.setTrangThai("DangKhoiTao");
         m.setTongSoKien(0);
-        return manifestRepo.save(m);
+        return ResponseEntity.ok(manifestRepo.save(m));
     }
 
     @PostMapping("/{maManifest}/quet-gom-don")
@@ -100,7 +105,20 @@ public class ManifestController {
                     m.setTrangThai("DaNiemPhong");
                 }
                 case "moLaiBangKe" -> m.setTrangThai("DangKhoiTao");
-                case "xuatXe" -> m.setTrangThai("DangVanChuyen");
+                case "xuatXe" -> {
+                    m.setTrangThai("DangVanChuyen");
+                    List<ChiTietManifest> items = chiTietRepo.findByMaManifest(maManifest);
+                    for (ChiTietManifest item : items) {
+                        LichSuHanhTrinh ls = new LichSuHanhTrinh();
+                        ls.setMaHanhTrinh("HT-" + UUID.randomUUID().toString().substring(0, 8));
+                        ls.setMaVanDon(item.getMaVanDon());
+                        ls.setMaBuuCuc(m.getMaBuuCucDi());
+                        ls.setMaNhanVienThucHien(m.getMaNhanVienLap());
+                        ls.setTrangThaiGhiNhan("DangLuanChuyen");
+                        ls.setMoTaChiTiet("Đơn hàng đang trên xe trung chuyển từ " + m.getMaBuuCucDi() + " đến " + m.getMaBuuCucDen() + " (Manifest " + maManifest + ")");
+                        lichSuRepo.save(ls);
+                    }
+                }
                 case "denKhoDich" -> m.setTrangThai("DaDenKhoDich");
                 case "batDauKiemNhan" -> m.setTrangThai("DangKiemNhan");
                 case "hoanTatDu" -> m.setTrangThai("HoanTatNhapKho");
@@ -141,6 +159,15 @@ public class ManifestController {
                         dh.setMaBuuCucHienTai(m.getMaBuuCucDen());
                         dh.setTrangThai("DaNhapKho");
                         donHangRepo.save(dh);
+
+                        LichSuHanhTrinh ls = new LichSuHanhTrinh();
+                        ls.setMaHanhTrinh("HT-" + UUID.randomUUID().toString().substring(0, 8));
+                        ls.setMaVanDon(dh.getMaVanDon());
+                        ls.setMaBuuCuc(m.getMaBuuCucDen());
+                        ls.setMaNhanVienThucHien(m.getMaNhanVienLap());
+                        ls.setTrangThaiGhiNhan("DaNhapKho");
+                        ls.setMoTaChiTiet("Đã kiểm nhận nhập kho đích " + m.getMaBuuCucDen() + " từ Manifest " + maManifest);
+                        lichSuRepo.save(ls);
                     });
                 }
             } else {

@@ -8,5 +8,6 @@ public interface DonHangRepository extends JpaRepository<DonHang, String> {
     List<DonHang> findByMaShipperOrderByNgayTaoDesc(String maShipper);
     List<DonHang> findByMaKhachHangOrderByNgayTaoDesc(String maKhachHang);
     List<DonHang> findByTrangThaiOrderByNgayTaoDesc(String trangThai);
+    List<DonHang> findByMaBuuCucHienTaiAndTrangThaiOrderByNgayTaoDesc(String maBuuCucHienTai, String trangThai);
     List<DonHang> findAllByOrderByNgayTaoDesc();
 }

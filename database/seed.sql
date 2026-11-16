@@ -30,7 +30,9 @@ INSERT INTO ngan_hang (ma_ngan_hang_dm, ten_ngan_hang, ten_viet_tat) VALUES
 -- 3. Bưu cục & Tuyến
 INSERT INTO buu_cuc (ma_buu_cuc, ten_buu_cuc, loai_kho, dia_chi, toa_do_gps, so_du_quy_ket, trang_thai_hoat_dong) VALUES
 ('BC_BENNGHE', N'Bưu cục Bến Nghé - Quầy 03', 'BuuCucPhat', N'12 Nguyễn Huệ, P. Bến Nghé, Quận 1, TP.HCM', '10.7745,106.7035', 15000000, 'Active'),
-('KHO_Q1', N'Kho trung chuyển Quận 1', 'KhoTrungChuyen', N'88 Lê Lợi, Quận 1, TP.HCM', '10.7731,106.7009', 45000000, 'Active');
+('KHO_Q1', N'Kho trung chuyển Quận 1', 'KhoTrungChuyen', N'88 Lê Lợi, Quận 1, TP.HCM', '10.7731,106.7009', 45000000, 'Active'),
+('BC_Q3', N'Bưu cục Quận 3 - Võ Văn Tần', 'BuuCucPhat', N'150 Võ Văn Tần, P. Võ Thị Sáu, Quận 3, TP.HCM', '10.7765,106.6889', 12000000, 'Active'),
+('BC_Q7', N'Bưu cục Quận 7 - Phú Mỹ Hưng', 'BuuCucPhat', N'200 Nguyễn Văn Linh, P. Tân Phong, Quận 7, TP.HCM', '10.7295,106.7192', 18000000, 'Active');
 
 INSERT INTO tuyen_giao_hang (ma_tuyen, ma_buu_cuc, ten_tuyen, loai_tuyen) VALUES
 ('TUYEN_Q1', 'BC_BENNGHE', N'Tuyến Quận 1 - Trung tâm', 'NoiThanh');
