@@ -221,6 +221,9 @@ public class ManifestController {
             donHangRepo.findById(bb.getMaVanDon()).ifPresent(dh -> {
                 if ("BoiThuong".equalsIgnoreCase(req.phuongAnXuLy())) {
                     dh.setTrangThai("DaBoiThuong");
+                } else if ("TraLaiKienHang".equalsIgnoreCase(req.phuongAnXuLy())
+                        || "ChuyenHoan".equalsIgnoreCase(req.phuongAnXuLy())) {
+                    dh.setTrangThai("ChoChuyenHoan");
                 } else {
                     dh.setTrangThai("DaNhapKho");
                 }
