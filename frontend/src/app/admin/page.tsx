@@ -465,9 +465,17 @@ export default function AdminPage() {
       <div className="flex-1 flex flex-col">
         <header className="bg-white border-b border-slate-200 px-8 py-4 flex items-center justify-between">
           <div className="text-sm text-slate-500">Quản trị vận hành / <span className="text-[#0F172A] font-semibold">HCM Hub</span></div>
-          <div className="text-right">
-            <div className="text-sm font-semibold">{user?.hoTen || "Quản trị viên"}</div>
-            <div className="text-xs text-slate-400">{user?.maNhanVien || "ADMIN"}</div>
+          <div className="flex items-center gap-4">
+            <div className="text-right">
+              <div className="text-sm font-semibold">{user?.hoTen || "Quản trị viên"}</div>
+              <div className="text-xs text-slate-400">{user?.maNhanVien || "ADMIN"}</div>
+            </div>
+            <button
+              onClick={() => { localStorage.removeItem("fastpost_user"); router.push("/"); }}
+              className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:text-red-600 hover:border-red-200 flex items-center gap-1.5"
+            >
+              <LogOut className="w-3.5 h-3.5" /> Đăng xuất
+            </button>
           </div>
         </header>
 

@@ -143,12 +143,23 @@ public class KhoGiaoVanController {
         BigDecimal totalCod = BigDecimal.ZERO;
         int validCount = 0;
 
+        // Lưu PhieuXuatKho trước để thỏa khóa ngoại FK từ chi_tiet_phieu_xuat -> phieu_xuat_kho
+        PhieuXuatKho px = new PhieuXuatKho();
+        px.setMaPhieuXuat(maPhieu);
+        px.setMaBuuCuc(req.maBuuCuc() != null ? req.maBuuCuc() : "BC_BENNGHE");
+        px.setMaNhanVienKho(req.maNhanVienKho() != null ? req.maNhanVienKho() : "NV_ADMIN_01");
+        px.setMaShipper(shipperId);
+        px.setTongSoDon(0);
+        px.setTongTienCodPhaiThu(BigDecimal.ZERO);
+        px.setShipperDaXacNhan(false);
+        phieuXuatRepo.saveAndFlush(px);
+
         for (String code : codes) {
             Optional<DonHang> dhOpt = donHangRepo.findById(code.trim());
             if (dhOpt.isPresent()) {
                 DonHang dh = dhOpt.get();
                 totalCod = totalCod.add(dh.getTienCod() != null ? dh.getTienCod() : BigDecimal.ZERO);
-                dh.setMaShipper(req.maShipper());
+                dh.setMaShipper(shipperId);
                 dh.setTrangThai("SanSangGiao");
                 donHangRepo.save(dh);
 
@@ -158,21 +169,14 @@ public class KhoGiaoVanController {
                 ct.setGhiChuBanGiao(req.ghiChu());
                 ctPhieuXuatRepo.save(ct);
 
-                addHistory(dh.getMaVanDon(), req.maBuuCuc(), req.maNhanVienKho(), "SanSangGiao",
-                        "Đã lập phiếu xuất kho " + maPhieu + " bàn giao cho Shipper " + req.maShipper());
+                addHistory(dh.getMaVanDon(), px.getMaBuuCuc(), px.getMaNhanVienKho(), "SanSangGiao",
+                        "Đã lập phiếu xuất kho " + maPhieu + " bàn giao cho Shipper " + shipperId);
                 validCount++;
             }
         }
 
-        PhieuXuatKho px = new PhieuXuatKho();
-        px.setMaPhieuXuat(maPhieu);
-        px.setMaBuuCuc(req.maBuuCuc() != null ? req.maBuuCuc() : "BC_BENNGHE");
-        px.setMaNhanVienKho(req.maNhanVienKho() != null ? req.maNhanVienKho() : "NV_ADMIN_01");
-        px.setMaShipper(req.maShipper() != null ? req.maShipper() : "NV_SHIP_01");
         px.setTongSoDon(validCount);
         px.setTongTienCodPhaiThu(totalCod);
-        px.setShipperDaXacNhan(false);
-
         return ResponseEntity.ok(phieuXuatRepo.save(px));
     }
 
@@ -216,7 +220,7 @@ public class KhoGiaoVanController {
             t.setMaBuuCuc("BC_BENNGHE");
             t.setTenTuyen("Tuyến " + req.quanHuyen());
             t.setLoaiTuyen("NoiThanh");
-            tuyenRepo.save(t);
+            tuyenRepo.saveAndFlush(t);
         }
 
         TieuTuyen tt = new TieuTuyen();
@@ -224,7 +228,7 @@ public class KhoGiaoVanController {
         tt.setMaTuyen(maTuyen);
         tt.setMaShipper(req.maShipper());
         tt.setTenTieuTuyen(req.tenTieuTuyen());
-        tieuTuyenRepo.save(tt);
+        tieuTuyenRepo.saveAndFlush(tt);
 
         ChiTietTieuTuyen ct = new ChiTietTieuTuyen();
         ct.setMaTieuTuyen(tt.getMaTieuTuyen());
