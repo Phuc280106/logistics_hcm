@@ -1,8 +1,23 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Zap, MapPin, Phone, CheckCircle2, XCircle, Package, Wallet, User, LogOut, Navigation, ClipboardCheck, AlertCircle } from "lucide-react";
+import {
+  Zap,
+  MapPin,
+  Phone,
+  CheckCircle2,
+  XCircle,
+  Package,
+  Wallet,
+  User,
+  LogOut,
+  Navigation,
+  ClipboardCheck,
+  AlertCircle,
+  PenTool,
+  RotateCcw,
+} from "lucide-react";
 import { apiFetch, formatVnd, UserSession } from "@/lib/api";
 
 interface DonHangItem {
@@ -35,10 +50,17 @@ export default function ShipperPage() {
   const [selected, setSelected] = useState<DonHangItem | null>(null);
   const [modalMode, setModalMode] = useState<"detail" | "pod" | "fail" | null>(null);
   const [receiverName, setReceiverName] = useState("");
+  const [podPhotoName, setPodPhotoName] = useState("pod-hien-truong.jpg");
+  const [gpsCoords, setGpsCoords] = useState("10.7745,106.7035");
+  const [hasSigned, setHasSigned] = useState(false);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const drawingRef = useRef(false);
+
   const [failReason, setFailReason] = useState("Khách không nghe máy");
   const [rescheduleDate, setRescheduleDate] = useState("");
   const [failNote, setFailNote] = useState("");
   const [codWallet, setCodWallet] = useState(0);
+  const [walletLocked, setWalletLocked] = useState(false);
   const [settleMsg, setSettleMsg] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
 
@@ -60,10 +82,55 @@ export default function ShipperPage() {
       .then((px) => setPhieuXuatList(px))
       .catch(() => {});
 
-    apiFetch<{ tongNoLuyKe: number }>(`/doi-soat/vi-cong-no/${shipperId}`)
-      .then((vi) => setCodWallet(Number(vi.tongNoLuyKe || 0)))
+    apiFetch<{ tongNoLuyKe: number; daKhoaNhanDon?: boolean }>(`/doi-soat/vi-cong-no/${shipperId}`)
+      .then((vi) => {
+        setCodWallet(Number(vi.tongNoLuyKe || 0));
+        setWalletLocked(Boolean(vi.daKhoaNhanDon));
+      })
       .catch(() => {});
+
+    if (typeof navigator !== "undefined" && navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          setGpsCoords(`${pos.coords.latitude.toFixed(5)},${pos.coords.longitude.toFixed(5)}`);
+        },
+        () => {}
+      );
+    }
   }, [router]);
+
+  function startDraw(x: number, y: number) {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    drawingRef.current = true;
+    ctx.strokeStyle = "#0F172A";
+    ctx.lineWidth = 2.2;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+  }
+
+  function moveDraw(x: number, y: number) {
+    if (!drawingRef.current) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.lineTo(x, y);
+    ctx.stroke();
+    setHasSigned(true);
+  }
+
+  function clearSignature() {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    setHasSigned(false);
+  }
 
   async function handleConfirmPhieuXuat(maPhieuXuat: string) {
     setErrorMsg("");
@@ -82,13 +149,19 @@ export default function ShipperPage() {
 
   async function handleConfirmPod() {
     if (!selected) return;
+    if (!hasSigned) {
+      setErrorMsg("Vui lòng thu thập chữ ký điện tử người nhận trên khung ký tên (UC 5.3).");
+      return;
+    }
     setErrorMsg("");
+    const sigData = canvasRef.current ? canvasRef.current.toDataURL("image/png") : "signed";
     try {
       await apiFetch(`/don-hang/${selected.maVanDon}/giao-thanh-cong`, {
         method: "POST",
         body: JSON.stringify({
-          anhChupGoiHang: "pod-captured.jpg",
-          toaDoGps: "10.7745,106.7035",
+          anhChupGoiHang: podPhotoName || "pod-captured.jpg",
+          toaDoGps: gpsCoords,
+          chuKyDienTu: sigData,
           tenNguoiKy: receiverName || selected.nguoiNhanTen,
           maNhanVien: user?.maNhanVien || "NV_SHIP_01",
         }),
@@ -96,7 +169,10 @@ export default function ShipperPage() {
       setOrders((prev) =>
         prev.map((o) => (o.maVanDon === selected.maVanDon ? { ...o, trangThai: "DaGiaoThanhCong" } : o))
       );
-      setCodWallet((w) => w + Number(selected.tienCod || 0));
+      const nextWallet = codWallet + Number(selected.tienCod || 0);
+      setCodWallet(nextWallet);
+      if (nextWallet >= 3000000) setWalletLocked(true);
+      setHasSigned(false);
       setModalMode(null);
       setSelected(null);
     } catch (err) {
@@ -142,6 +218,53 @@ export default function ShipperPage() {
     }
   }
 
+  async function handleRejectPickup(maVanDon: string) {
+    setErrorMsg("");
+    try {
+      await apiFetch(`/don-hang/${maVanDon}/tu-choi-lay`, {
+        method: "POST",
+        body: JSON.stringify({ lyDo: "Shipper báo quá tải / sự cố xe trên App" }),
+      });
+      setOrders((prev) => prev.filter((o) => o.maVanDon !== maVanDon));
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Lỗi từ chối đơn lấy");
+    }
+  }
+
+  async function handleHandoverWarehouse(maVanDon: string, targetKho: string) {
+    setErrorMsg("");
+    try {
+      await apiFetch(`/don-hang/${maVanDon}/nhap-kho`, {
+        method: "POST",
+        body: JSON.stringify({
+          maBuuCuc: targetKho,
+          maNhanVien: user?.maNhanVien || "NV_SHIP_01",
+        }),
+      });
+      setOrders((prev) =>
+        prev.map((o) => (o.maVanDon === maVanDon ? { ...o, trangThai: "DaNhapKho" } : o))
+      );
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Lỗi bàn giao nhập kho");
+    }
+  }
+
+  async function handleRedeliver(maVanDon: string) {
+    setErrorMsg("");
+    try {
+      await apiFetch(`/don-hang/${maVanDon}/phat-lai`, {
+        method: "POST",
+        body: JSON.stringify({ maNhanVien: user?.maNhanVien || "NV_SHIP_01" }),
+      });
+      setOrders((prev) =>
+        prev.map((o) => (o.maVanDon === maVanDon ? { ...o, trangThai: "DangGiaoHang" } : o))
+      );
+      setTab("deliver");
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Lỗi kích hoạt giao lại");
+    }
+  }
+
   async function handleRequestSettlement() {
     if (codWallet <= 0) return;
     setErrorMsg("");
@@ -166,8 +289,12 @@ export default function ShipperPage() {
 
   const pendingPhieuXuat = phieuXuatList.filter((p) => !p.shipperDaXacNhan);
   const activeDeliver = orders.filter((o) => o.trangThai === "DangGiaoHang" || o.trangThai === "SanSangGiao");
-  const pickupOrders = orders.filter((o) => o.trangThai === "ChoPhanCongLay");
-  const doneOrders = orders.filter((o) => o.trangThai === "DaGiaoThanhCong" || o.trangThai === "ChoGiaoLai" || o.trangThai === "ChoChuyenHoan" || o.trangThai === "DaLayHang");
+  const pickupOrders = orders.filter(
+    (o) => o.trangThai === "ChoPhanCongLay" || o.trangThai === "DaPhanCongLay" || o.trangThai === "DaLayHang"
+  );
+  const doneOrders = orders.filter((o) =>
+    ["DaGiaoThanhCong", "DaQuyetToanCOD", "ChoGiaoLai", "ChoChuyenHoan", "DaChuyenHoan", "DaNhapKho"].includes(o.trangThai)
+  );
   const listToShow = tab === "deliver" ? activeDeliver : tab === "pickup" ? pickupOrders : doneOrders;
   const pct = Math.min(100, Math.round((codWallet / 3000000) * 100));
 
@@ -197,15 +324,17 @@ export default function ShipperPage() {
           <div className="flex items-center justify-between">
             <span className="text-xs text-slate-500 font-medium">Danh sách ca phát</span>
             <button
-              onClick={() => setOnline(!online)}
+              onClick={() => !walletLocked && setOnline(!online)}
               className={`flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold border ${
-                online
+                walletLocked
+                  ? "bg-red-50 text-red-700 border-red-200"
+                  : online
                   ? "bg-emerald-50 text-emerald-700 border-emerald-200"
                   : "bg-slate-100 text-slate-500 border-slate-200"
               }`}
             >
-              <span className={`w-2 h-2 rounded-full ${online ? "bg-emerald-500" : "bg-slate-400"}`} />
-              {online ? "Đang nhận đơn" : "Tạm nghỉ"}
+              <span className={`w-2 h-2 rounded-full ${walletLocked ? "bg-red-500" : online ? "bg-emerald-500" : "bg-slate-400"}`} />
+              {walletLocked ? "Bị khóa nhận đơn (Nợ COD)" : online ? "Đang nhận đơn" : "Tạm nghỉ"}
             </button>
           </div>
         </header>
@@ -254,16 +383,16 @@ export default function ShipperPage() {
             <div className="flex items-center justify-between text-xs mb-1.5">
               <span className="text-slate-300">Ví COD hiện tại: <strong className="text-white">{formatVnd(codWallet)}</strong></span>
               <span className={`px-2 py-0.5 rounded-full text-[11px] font-semibold ${
-                pct > 80 ? "bg-red-500/20 text-red-300" : "bg-emerald-500/20 text-emerald-300"
+                walletLocked || pct > 80 ? "bg-red-500/20 text-red-300" : "bg-emerald-500/20 text-emerald-300"
               }`}>
-                {pct > 80 ? "Cảnh báo" : "An toàn"}
+                {walletLocked ? "Đã khóa nhận đơn" : pct > 80 ? "Cảnh báo" : "An toàn"}
               </span>
             </div>
             <div className="w-full h-1.5 bg-slate-700 rounded-full overflow-hidden mb-1.5">
               <div className="h-full bg-[#FF5722] rounded-full" style={{ width: `${pct}%` }} />
             </div>
             <div className="flex justify-between text-[11px] text-slate-400">
-              <span>Hạn mức 3.000.000đ</span>
+              <span>Hạn mức 3.000.000đ / 24h</span>
               <span>{pct}%</span>
             </div>
             {codWallet > 0 && (
@@ -312,7 +441,7 @@ export default function ShipperPage() {
             ) : (
               listToShow.map((o) => (
                 <div key={o.maVanDon} className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
-                  <div className="mb-2">
+                  <div className="mb-2 flex items-center justify-between">
                     {o.maGoiDichVu === "GDV_HOATOC" ? (
                       <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-orange-50 text-[#FF5722] text-xs font-semibold">
                         <Zap className="w-3.5 h-3.5 fill-current" /> FastPost Hỏa Tốc
@@ -322,6 +451,7 @@ export default function ShipperPage() {
                         FastPost Tiêu Chuẩn
                       </span>
                     )}
+                    <span className="text-[11px] font-semibold text-slate-500">{o.trangThai}</span>
                   </div>
                   <div className="text-xs text-slate-400 font-mono mb-0.5">#{o.maVanDon}</div>
                   <div className="flex items-center justify-between mb-1">
@@ -333,29 +463,69 @@ export default function ShipperPage() {
                     {o.diaChiGiaoChiTiet}, {o.phuongXaGiao}, {o.quanHuyenGiao}
                   </p>
 
-                  <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+                  <div className="flex items-center justify-between pt-2 border-t border-slate-100 gap-2">
                     <div>
                       <div className="text-[11px] text-slate-400">Tiền thu hộ</div>
                       <div className="font-bold text-base text-[#0F172A]">{formatVnd(o.tienCod)}</div>
                     </div>
                     {tab === "deliver" ? (
                       <button
-                        onClick={() => { setSelected(o); setModalMode("detail"); setReceiverName(o.nguoiNhanTen); }}
+                        onClick={() => {
+                          setSelected(o);
+                          setModalMode("detail");
+                          setReceiverName(o.nguoiNhanTen);
+                          setHasSigned(false);
+                        }}
                         className="px-4 py-2 bg-[#FF5722] hover:bg-[#E64A19] text-white text-xs font-semibold rounded-xl transition"
                       >
                         Bắt đầu giao →
                       </button>
                     ) : tab === "pickup" ? (
-                      <button
-                        onClick={() => handleConfirmPickup(o.maVanDon)}
-                        className="px-4 py-2 bg-[#0F172A] hover:bg-slate-800 text-white text-xs font-semibold rounded-xl transition"
-                      >
-                        Xác nhận đã lấy hàng
-                      </button>
+                      o.trangThai === "DaLayHang" ? (
+                        <div className="flex gap-1.5">
+                          <button
+                            onClick={() => handleHandoverWarehouse(o.maVanDon, "KHO_Q1")}
+                            className="px-2.5 py-1.5 bg-emerald-600 text-white text-[11px] font-semibold rounded-lg"
+                          >
+                            Nhập KHO_Q1
+                          </button>
+                          <button
+                            onClick={() => handleHandoverWarehouse(o.maVanDon, user?.maBuuCuc || "BC_BENNGHE")}
+                            className="px-2.5 py-1.5 bg-[#0F172A] text-white text-[11px] font-semibold rounded-lg"
+                          >
+                            Nhập {user?.maBuuCuc || "BC_BENNGHE"}
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex gap-1.5">
+                          <button
+                            onClick={() => handleRejectPickup(o.maVanDon)}
+                            className="px-2.5 py-2 border border-red-200 bg-red-50 text-red-700 text-[11px] font-semibold rounded-xl"
+                          >
+                            Từ chối
+                          </button>
+                          <button
+                            onClick={() => handleConfirmPickup(o.maVanDon)}
+                            className="px-3 py-2 bg-[#0F172A] hover:bg-slate-800 text-white text-xs font-semibold rounded-xl transition"
+                          >
+                            Đã lấy hàng
+                          </button>
+                        </div>
+                      )
                     ) : (
-                      <span className="px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 text-xs font-semibold">
-                        {o.trangThai}
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        {o.trangThai === "ChoGiaoLai" && (
+                          <button
+                            onClick={() => handleRedeliver(o.maVanDon)}
+                            className="px-2.5 py-1.5 bg-[#FF5722] text-white text-[11px] font-semibold rounded-lg flex items-center gap-1"
+                          >
+                            <RotateCcw className="w-3 h-3" /> Giao lại
+                          </button>
+                        )}
+                        <span className="px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 text-xs font-semibold">
+                          {o.trangThai}
+                        </span>
+                      </div>
                     )}
                   </div>
                 </div>
@@ -429,14 +599,64 @@ export default function ShipperPage() {
                       className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm"
                     />
                   </div>
-                  <div className="p-4 border-2 border-dashed border-slate-300 rounded-xl text-center text-xs text-slate-500">
-                    GPS đã ghi nhận: 10.7745, 106.7035 · Đính kèm ảnh gói hàng
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">Ảnh kiện hàng tại điểm giao (Camera)</label>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) setPodPhotoName(f.name);
+                      }}
+                      className="w-full text-xs text-slate-600 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-slate-100 file:font-semibold"
+                    />
+                    <div className="mt-1 text-[11px] text-emerald-700">
+                      GPS Watermark: <strong>{gpsCoords}</strong> · File: {podPhotoName}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-xs font-medium text-slate-600 flex items-center gap-1">
+                        <PenTool className="w-3.5 h-3.5 text-[#FF5722]" /> Chữ ký điện tử người nhận *
+                      </label>
+                      <button type="button" onClick={clearSignature} className="text-[11px] text-slate-500 underline">
+                        Xóa ký lại
+                      </button>
+                    </div>
+                    <canvas
+                      ref={canvasRef}
+                      width={340}
+                      height={110}
+                      onMouseDown={(e) => {
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        startDraw(e.clientX - rect.left, e.clientY - rect.top);
+                      }}
+                      onMouseMove={(e) => {
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        moveDraw(e.clientX - rect.left, e.clientY - rect.top);
+                      }}
+                      onMouseUp={() => { drawingRef.current = false; }}
+                      onMouseLeave={() => { drawingRef.current = false; }}
+                      onTouchStart={(e) => {
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        const t = e.touches[0];
+                        startDraw(t.clientX - rect.left, t.clientY - rect.top);
+                      }}
+                      onTouchMove={(e) => {
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        const t = e.touches[0];
+                        moveDraw(t.clientX - rect.left, t.clientY - rect.top);
+                      }}
+                      onTouchEnd={() => { drawingRef.current = false; }}
+                      className="w-full h-28 bg-slate-50 border-2 border-dashed border-slate-300 rounded-xl cursor-crosshair touch-none"
+                    />
                   </div>
                   <button
                     onClick={handleConfirmPod}
                     className="w-full py-2.5 bg-[#FF5722] text-white font-semibold rounded-xl text-sm"
                   >
-                    Xác nhận hoàn tất giao hàng
+                    Lưu POD &amp; Hoàn tất giao hàng
                   </button>
                 </>
               )}
@@ -450,27 +670,30 @@ export default function ShipperPage() {
                       onChange={(e) => setFailReason(e.target.value)}
                       className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm"
                     >
-                      <option>Khách không nghe máy</option>
-                      <option>Khách hẹn giao lại ngày khác</option>
-                      <option>Sai địa chỉ / Khách từ chối nhận</option>
+                      <option value="Khách không nghe máy">Khách không nghe máy</option>
+                      <option value="Khách hẹn giao lại ngày khác">Khách hẹn giao lại ngày khác</option>
+                      <option value="Sai địa chỉ nhận hàng">Sai địa chỉ nhận hàng</option>
+                      <option value="Khách từ chối nhận (Boom hàng)">Khách từ chối nhận (Boom hàng → Chuyển hoàn ngay)</option>
                     </select>
                   </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-600 mb-1">Ngày giờ hẹn giao lại</label>
-                    <input
-                      type="datetime-local"
-                      value={rescheduleDate}
-                      onChange={(e) => setRescheduleDate(e.target.value)}
-                      className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm"
-                    />
-                  </div>
+                  {!failReason.includes("từ chối") && (
+                    <div>
+                      <label className="block text-xs font-medium text-slate-600 mb-1">Ngày giờ hẹn giao lại</label>
+                      <input
+                        type="datetime-local"
+                        value={rescheduleDate}
+                        onChange={(e) => setRescheduleDate(e.target.value)}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm"
+                      />
+                    </div>
+                  )}
                   <div>
                     <label className="block text-xs font-medium text-slate-600 mb-1">Ghi chú lịch hẹn</label>
                     <input
                       type="text"
                       value={failNote}
                       onChange={(e) => setFailNote(e.target.value)}
-                      placeholder="Nhập ghi chú..."
+                      placeholder="Ghi chú thực tế..."
                       className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm"
                     />
                   </div>
@@ -478,7 +701,7 @@ export default function ShipperPage() {
                     onClick={handleReportFail}
                     className="w-full py-2.5 bg-red-600 text-white font-semibold rounded-xl text-sm"
                   >
-                    Lưu lịch hẹn giao lại / Báo thất bại
+                    Xác nhận báo thất bại
                   </button>
                 </>
               )}
