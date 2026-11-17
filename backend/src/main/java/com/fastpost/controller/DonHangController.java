@@ -27,6 +27,8 @@ public class DonHangController {
     private final NhatKyInTemRepository nhatKyInTemRepo;
     private final ViCongNoShipperRepository viRepo;
     private final ShipperRepository shipperRepo;
+    private final NguoiDungRepository nguoiDungRepo;
+    private final KhachHangRepository khachHangRepo;
 
     public DonHangController(
             DonHangRepository donHangRepo,
@@ -41,7 +43,9 @@ public class DonHangController {
             ChiTietBangGiaRepository ctBangGiaRepo,
             NhatKyInTemRepository nhatKyInTemRepo,
             ViCongNoShipperRepository viRepo,
-            ShipperRepository shipperRepo) {
+            ShipperRepository shipperRepo,
+            NguoiDungRepository nguoiDungRepo,
+            KhachHangRepository khachHangRepo) {
         this.donHangRepo = donHangRepo;
         this.lichSuRepo = lichSuRepo;
         this.podRepo = podRepo;
@@ -55,6 +59,8 @@ public class DonHangController {
         this.nhatKyInTemRepo = nhatKyInTemRepo;
         this.viRepo = viRepo;
         this.shipperRepo = shipperRepo;
+        this.nguoiDungRepo = nguoiDungRepo;
+        this.khachHangRepo = khachHangRepo;
     }
 
     public record FeeCalcRequest(
@@ -84,14 +90,18 @@ public class DonHangController {
             String hinhThucThanhToan,
             Boolean taiQuay) {}
 
-    public record PodRequest(String anhChupGoiHang, String toaDoGps, String tenNguoiKy, String maNhanVien) {}
+    public record PodRequest(String anhChupGoiHang, String toaDoGps, String chuKyDienTu, String tenNguoiKy, String maNhanVien) {}
     public record FailDeliveryRequest(String lyDoThatBai, String ngayHenGiaoLai, String ghiChu, String maNhanVien) {}
 
     @GetMapping
     public List<DonHang> listAll(@RequestParam(required = false) String shipper,
-                                 @RequestParam(required = false) String status) {
+                                 @RequestParam(required = false) String status,
+                                 @RequestParam(required = false) String khachHang) {
         if (shipper != null && !shipper.isBlank()) {
             return donHangRepo.findByMaShipperOrderByNgayTaoDesc(shipper);
+        }
+        if (khachHang != null && !khachHang.isBlank()) {
+            return donHangRepo.findByMaKhachHangOrderByNgayTaoDesc(khachHang);
         }
         if (status != null && !status.isBlank()) {
             return donHangRepo.findByTrangThaiOrderByNgayTaoDesc(status);
@@ -99,14 +109,31 @@ public class DonHangController {
         return donHangRepo.findAllByOrderByNgayTaoDesc();
     }
 
+    @GetMapping("/khach-hang/{maKhachHang}")
+    public List<DonHang> listByCustomer(@PathVariable String maKhachHang) {
+        Map<String, DonHang> merged = new LinkedHashMap<>();
+        for (DonHang dh : donHangRepo.findByMaKhachHangOrderByNgayTaoDesc(maKhachHang)) {
+            merged.put(dh.getMaVanDon(), dh);
+        }
+        nguoiDungRepo.findById(maKhachHang).ifPresent(nd -> {
+            for (DonHang dh : donHangRepo.findByNguoiGuiSdtOrderByNgayTaoDesc(nd.getSoDienThoai())) {
+                merged.putIfAbsent(dh.getMaVanDon(), dh);
+            }
+        });
+        return new ArrayList<>(merged.values());
+    }
+
     @GetMapping("/{maVanDon}")
     public ResponseEntity<?> getDetail(@PathVariable String maVanDon) {
         return donHangRepo.findById(maVanDon)
-                .map(dh -> ResponseEntity.ok(Map.of(
-                        "donHang", dh,
-                        "hanhTrinh", lichSuRepo.findByMaVanDonOrderByThoiGianAsc(maVanDon),
-                        "lichHenGiaoLai", lichHenRepo.findByMaVanDonOrderByLanGiaoThuAsc(maVanDon)
-                )))
+                .map(dh -> {
+                    Map<String, Object> body = new LinkedHashMap<>();
+                    body.put("donHang", dh);
+                    body.put("hanhTrinh", lichSuRepo.findByMaVanDonOrderByThoiGianAsc(maVanDon));
+                    body.put("lichHenGiaoLai", lichHenRepo.findByMaVanDonOrderByLanGiaoThuAsc(maVanDon));
+                    body.put("pod", podRepo.findByMaVanDon(maVanDon).orElse(null));
+                    return ResponseEntity.ok(body);
+                })
                 .orElse(ResponseEntity.notFound().build());
     }
 
@@ -170,24 +197,46 @@ public class DonHangController {
                 req.maGoiDichVu(), req.trongLuongThuc(), req.chieuDai(), req.chieuRong(),
                 req.chieuCao(), req.laHangDeVo(), req.tienCod()));
 
-        // Tự động phân công Shipper theo tiểu tuyến (quận/huyện + phường/xã)
-        String assignedShipper = ctTieuTuyenRepo
+        // Tự động tra cứu khách gửi theo SĐT hoặc khởi tạo Tài khoản ngầm (Shadow Account - UC 3.2)
+        String sdtGui = (req.nguoiGuiSdt() != null && !req.nguoiGuiSdt().isBlank()) ? req.nguoiGuiSdt().trim() : "0909123456";
+        NguoiDung senderUser = nguoiDungRepo.findBySoDienThoai(sdtGui).orElseGet(() -> {
+            NguoiDung created = new NguoiDung();
+            created.setMaNguoiDung("ND_KH_" + System.currentTimeMillis());
+            created.setSoDienThoai(sdtGui);
+            created.setHoTen("Khách gửi " + sdtGui);
+            created.setTrangThai("Active");
+            return nguoiDungRepo.save(created);
+        });
+        KhachHang senderKh = khachHangRepo.findById(senderUser.getMaNguoiDung()).orElseGet(() -> {
+            KhachHang kh = new KhachHang();
+            kh.setMaNguoiDung(senderUser.getMaNguoiDung());
+            kh.setLoaiKhachHang("CaNhan");
+            kh.setLaTaiKhoanNgam(true);
+            return khachHangRepo.save(kh);
+        });
+
+        // Tự động phân công Shipper theo tiểu tuyến (nếu Shipper không bị khóa nợ COD - UC 5.1)
+        String candidateShipper = ctTieuTuyenRepo
                 .findFirstByQuanHuyenIgnoreCaseAndPhuongXaIgnoreCase(
                         req.quanHuyenGiao() != null ? req.quanHuyenGiao() : "",
                         req.phuongXaGiao() != null ? req.phuongXaGiao() : "")
                 .flatMap(ct -> tieuTuyenRepo.findById(ct.getMaTieuTuyen()))
                 .map(TieuTuyen::getMaShipper)
                 .orElse("NV_SHIP_01");
+        boolean locked = viRepo.findByMaShipper(candidateShipper)
+                .map(vi -> Boolean.TRUE.equals(vi.getDaKhoaNhanDon()))
+                .orElse(false);
+        String assignedShipper = locked ? null : candidateShipper;
 
         DonHang dh = new DonHang();
         String code = "FP-" + (10000 + new Random().nextInt(89999));
         dh.setMaVanDon(code);
-        dh.setMaKhachHang("ND_KH_01");
+        dh.setMaKhachHang(senderKh.getMaNguoiDung());
         dh.setMaBuuCucHienTai("BC_BENNGHE");
         dh.setMaShipper(assignedShipper);
         dh.setMaGoiDichVu(req.maGoiDichVu() != null ? req.maGoiDichVu() : "GDV_TIEUCHUAN");
         dh.setMaLoaiHang(Boolean.TRUE.equals(req.laHangDeVo()) ? "LHH_DEVO" : "LHH_THUONG");
-        dh.setNguoiGuiSdt(req.nguoiGuiSdt());
+        dh.setNguoiGuiSdt(sdtGui);
         dh.setNguoiNhanTen(req.nguoiNhanTen());
         dh.setNguoiNhanSdt(req.nguoiNhanSdt());
         dh.setDiaChiGiaoChiTiet(req.diaChiGiaoChiTiet());
@@ -254,11 +303,15 @@ public class DonHangController {
             dh.setTrangThai("DaGiaoThanhCong");
             donHangRepo.save(dh);
 
-            BangChungGiaoHang pod = new BangChungGiaoHang();
-            pod.setMaPod("POD-" + System.currentTimeMillis());
-            pod.setMaVanDon(maVanDon);
+            BangChungGiaoHang pod = podRepo.findByMaVanDon(maVanDon).orElseGet(() -> {
+                BangChungGiaoHang created = new BangChungGiaoHang();
+                created.setMaPod("POD-" + System.currentTimeMillis());
+                created.setMaVanDon(maVanDon);
+                return created;
+            });
             pod.setAnhChupGoiHang(req.anhChupGoiHang() != null ? req.anhChupGoiHang() : "pod-demo.jpg");
             pod.setToaDoGps(req.toaDoGps() != null ? req.toaDoGps() : "10.7745,106.7035");
+            pod.setChuKyDienTu(req.chuKyDienTu());
             pod.setTenNguoiKy(req.tenNguoiKy() != null ? req.tenNguoiKy() : dh.getNguoiNhanTen());
             podRepo.save(pod);
 
@@ -321,35 +374,106 @@ public class DonHangController {
         }).orElse(ResponseEntity.notFound().build());
     }
 
+    @PostMapping("/{maVanDon}/huy")
+    @Transactional
+    public ResponseEntity<?> cancelOrder(@PathVariable String maVanDon, @RequestBody(required = false) Map<String, String> body) {
+        return donHangRepo.findById(maVanDon).map(dh -> {
+            if (!List.of("MoiTao", "ChoPhanCongLay", "DaPhanCongLay").contains(dh.getTrangThai())) {
+                return ResponseEntity.badRequest().body(Map.of(
+                        "message", "Chỉ có thể hủy đơn khi chưa lấy hàng (trạng thái hiện tại: " + dh.getTrangThai() + ")"));
+            }
+            dh.setTrangThai("DaHuy");
+            dh.setMaShipper(null);
+            donHangRepo.save(dh);
+            String lyDo = body != null && body.get("lyDo") != null ? body.get("lyDo") : "Khách hàng yêu cầu hủy đơn";
+            addHistory(maVanDon, dh.getMaBuuCucHienTai(), "NV_QUAY_01", "DaHuy", "Đã hủy đơn hàng: " + lyDo);
+            return ResponseEntity.ok(dh);
+        }).orElse(ResponseEntity.notFound().build());
+    }
+
+    @PostMapping("/{maVanDon}/phan-cong-lay")
+    @Transactional
+    public ResponseEntity<?> assignPickup(@PathVariable String maVanDon, @RequestBody Map<String, String> body) {
+        String shipperId = body.getOrDefault("maShipper", "NV_SHIP_01");
+        boolean locked = viRepo.findByMaShipper(shipperId)
+                .map(vi -> Boolean.TRUE.equals(vi.getDaKhoaNhanDon()))
+                .orElse(false);
+        if (locked) {
+            return ResponseEntity.badRequest().body(Map.of("message", "Shipper " + shipperId + " đang bị khóa công nợ COD, không thể phân công"));
+        }
+        return donHangRepo.findById(maVanDon).map(dh -> {
+            dh.setMaShipper(shipperId);
+            dh.setTrangThai("DaPhanCongLay");
+            donHangRepo.save(dh);
+            addHistory(maVanDon, dh.getMaBuuCucHienTai(), "NV_ADMIN_01", "DaPhanCongLay",
+                    "Đã phân công Shipper " + shipperId + " đi lấy hàng");
+            return ResponseEntity.ok(dh);
+        }).orElse(ResponseEntity.notFound().build());
+    }
+
+    @PostMapping("/{maVanDon}/tu-choi-lay")
+    @Transactional
+    public ResponseEntity<?> rejectPickup(@PathVariable String maVanDon, @RequestBody(required = false) Map<String, String> body) {
+        return donHangRepo.findById(maVanDon).map(dh -> {
+            String oldShipper = dh.getMaShipper() != null ? dh.getMaShipper() : "NV_SHIP_01";
+            String lyDo = body != null && body.get("lyDo") != null ? body.get("lyDo") : "Sự cố phương tiện / Quá tải";
+            dh.setMaShipper(null);
+            dh.setTrangThai("ChoPhanCongLay");
+            donHangRepo.save(dh);
+            addHistory(maVanDon, dh.getMaBuuCucHienTai(), oldShipper, "ChoPhanCongLay",
+                    "Shipper " + oldShipper + " từ chối lệnh lấy hàng (" + lyDo + ") — chờ điều phối lại");
+            return ResponseEntity.ok(dh);
+        }).orElse(ResponseEntity.notFound().build());
+    }
+
     @PostMapping("/{maVanDon}/giao-that-bai")
     @Transactional
     public ResponseEntity<?> failDelivery(@PathVariable String maVanDon, @RequestBody FailDeliveryRequest req) {
         return donHangRepo.findById(maVanDon).map(dh -> {
             int fails = dh.getSoLanGiaoThatBai() + 1;
             dh.setSoLanGiaoThatBai(fails);
-            dh.setTrangThai(fails >= 3 ? "ChoChuyenHoan" : "ChoGiaoLai");
+            String lyDo = req.lyDoThatBai() != null ? req.lyDoThatBai() : "Khách không nghe máy";
+            boolean khachTuChoi = lyDo.toLowerCase().contains("từ chối") || lyDo.toLowerCase().contains("boom");
+            boolean chuyenHoan = fails >= 3 || khachTuChoi;
+            dh.setTrangThai(chuyenHoan ? "ChoChuyenHoan" : "ChoGiaoLai");
             donHangRepo.save(dh);
 
             LichHenGiaoLai lh = new LichHenGiaoLai();
             lh.setMaLichHen("LH-" + System.currentTimeMillis());
             lh.setMaVanDon(maVanDon);
             lh.setLanGiaoThu(fails);
-            lh.setLyDoThatBai(req.lyDoThatBai() != null ? req.lyDoThatBai() : "Khách không nghe máy");
-            if (req.ngayHenGiaoLai() != null && !req.ngayHenGiaoLai().isBlank()) {
-                try {
-                    lh.setNgayHenGiaoLai(LocalDateTime.parse(req.ngayHenGiaoLai()));
-                } catch (Exception ignored) {
+            lh.setLyDoThatBai(lyDo);
+            if (!chuyenHoan) {
+                if (req.ngayHenGiaoLai() != null && !req.ngayHenGiaoLai().isBlank()) {
+                    try {
+                        lh.setNgayHenGiaoLai(LocalDateTime.parse(req.ngayHenGiaoLai()));
+                    } catch (Exception ignored) {
+                        lh.setNgayHenGiaoLai(LocalDateTime.now().plusDays(1));
+                    }
+                } else {
                     lh.setNgayHenGiaoLai(LocalDateTime.now().plusDays(1));
                 }
-            } else {
-                lh.setNgayHenGiaoLai(LocalDateTime.now().plusDays(1));
             }
             lh.setGhiChu(req.ghiChu());
             lichHenRepo.save(lh);
 
             addHistory(maVanDon, dh.getMaBuuCucHienTai(), req.maNhanVien(), dh.getTrangThai(),
-                    "Giao thất bại lần " + fails + ": " + lh.getLyDoThatBai()
-                            + (fails >= 3 ? " (Chuyển sang Chờ chuyển hoàn)" : " (Đã tạo lịch hẹn giao lại)"));
+                    "Giao thất bại lần " + fails + ": " + lyDo
+                            + (chuyenHoan ? " (Chuyển thẳng sang Chờ chuyển hoàn)" : " (Đã tạo lịch hẹn giao lại)"));
+            return ResponseEntity.ok(dh);
+        }).orElse(ResponseEntity.notFound().build());
+    }
+
+    @PostMapping("/{maVanDon}/phat-lai")
+    @Transactional
+    public ResponseEntity<?> redeliverOrder(@PathVariable String maVanDon, @RequestBody(required = false) Map<String, String> body) {
+        return donHangRepo.findById(maVanDon).map(dh -> {
+            String shipperId = body != null && body.get("maNhanVien") != null ? body.get("maNhanVien") : dh.getMaShipper();
+            dh.setTrangThai("DangGiaoHang");
+            if (shipperId != null) dh.setMaShipper(shipperId);
+            donHangRepo.save(dh);
+            addHistory(maVanDon, dh.getMaBuuCucHienTai(), shipperId != null ? shipperId : "NV_SHIP_01", "DangGiaoHang",
+                    "Đưa đơn Chờ giao lại vào ca phát tiếp theo");
             return ResponseEntity.ok(dh);
         }).orElse(ResponseEntity.notFound().build());
     }
@@ -380,10 +504,25 @@ public class DonHangController {
 
     @PostMapping("/{maVanDon}/in-tem")
     public ResponseEntity<?> logInTem(@PathVariable String maVanDon, @RequestBody(required = false) InTemRequest req) {
-        if (!donHangRepo.existsById(maVanDon)) {
+        Optional<DonHang> dhOpt = donHangRepo.findById(maVanDon);
+        if (dhOpt.isEmpty()) {
             return ResponseEntity.badRequest().body(Map.of("message", "Không tìm thấy vận đơn " + maVanDon));
         }
+        DonHang dh = dhOpt.get();
         long existingCount = nhatKyInTemRepo.countByMaVanDon(maVanDon);
+
+        // UC 3.3.3 branch 6a & 6b: kiểm tra điều kiện in lại tem
+        if (existingCount > 0) {
+            if (List.of("DangGiaoHang", "DaGiaoThanhCong", "DaQuyetToanCOD", "DaHuy", "DaChuyenHoan").contains(dh.getTrangThai())) {
+                return ResponseEntity.badRequest().body(Map.of(
+                        "message", "Từ chối in lại tem: Kiện hàng đã xuất kho hoặc đã đóng (" + dh.getTrangThai() + ")"));
+            }
+            if (existingCount >= 4) {
+                return ResponseEntity.badRequest().body(Map.of(
+                        "message", "Từ chối in lại tem: Đã vượt quá số lần in lại tối đa cho phép (3 lần in lại)"));
+            }
+        }
+
         NhatKyInTem log = new NhatKyInTem();
         log.setMaNhatKy("IN-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase());
         log.setMaVanDon(maVanDon);
