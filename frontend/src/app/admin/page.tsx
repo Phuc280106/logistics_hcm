@@ -16,8 +16,12 @@ import {
   PackageCheck,
   AlertCircle,
   Database,
+  Users,
+  Download,
+  Unlock,
+  KeyRound,
 } from "lucide-react";
-import { apiFetch, formatVnd, UserSession } from "@/lib/api";
+import { API_BASE, apiFetch, formatVnd, UserSession } from "@/lib/api";
 import { DISTRICT_NAMES, HCM_DISTRICTS } from "@/lib/hcmLocations";
 
 interface ManifestItem {
@@ -82,9 +86,36 @@ interface KpiItem {
 export default function AdminPage() {
   const router = useRouter();
   const [user, setUser] = useState<UserSession | null>(null);
-  const [section, setSection] = useState<"warehouse" | "dispatch" | "finance" | "sla" | "catalog">("warehouse");
+  const [section, setSection] = useState<"warehouse" | "dispatch" | "finance" | "sla" | "catalog" | "staff">("warehouse");
   const [notice, setNotice] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
+
+  // UC 1.1 Internal Staff state
+  const [staffList, setStaffList] = useState<{
+    maNhanVien: string;
+    hoTen?: string;
+    soDienThoai?: string;
+    email?: string;
+    maBuuCuc: string;
+    loaiNhanVien: string;
+    trangThai?: string;
+    tongNoLuyKe?: number;
+    daKhoaNhanDon?: boolean;
+  }[]>([]);
+  const [stCode, setStCode] = useState("");
+  const [stName, setStName] = useState("");
+  const [stPhone, setStPhone] = useState("");
+  const [stEmail, setStEmail] = useState("");
+  const [stBuuCuc, setStBuuCuc] = useState("BC_BENNGHE");
+  const [stRole, setStRole] = useState("Quay");
+  const [stPlate, setStPlate] = useState("");
+
+  // UC 7.2 SLA Alerts state
+  const [slaAlerts, setSlaAlerts] = useState<{
+    tonKhoQua24h: { maVanDon: string; maBuuCucHienTai: string; trangThai: string; soGioTon: number; nguoiNhanTen: string }[];
+    treSlaQua48h: { maVanDon: string; maShipper: string; maGoiDichVu: string; trangThai: string; soGioTre: number; nguoiNhanTen: string }[];
+    donSuCo: { maVanDon: string; trangThai: string; nguoiNhanTen: string }[];
+  }>({ tonKhoQua24h: [], treSlaQua48h: [], donSuCo: [] });
 
   // Master Data (Nhóm 3)
   const [vungTuyenList, setVungTuyenList] = useState<{ maVungTuyen: string; tenVungTuyen: string; moTa?: string }[]>([]);
@@ -175,6 +206,8 @@ export default function AdminPage() {
     apiFetch<typeof nganHangList>("/danh-muc/ngan-hang").then(setNganHangList).catch(() => {});
     apiFetch<typeof tuyenList>("/danh-muc/tuyen-giao-hang").then(setTuyenList).catch(() => {});
     apiFetch<typeof khachHangList>("/khach-hang").then(setKhachHangList).catch(() => {});
+    apiFetch<typeof staffList>("/nhan-su").then(setStaffList).catch(() => {});
+    apiFetch<typeof slaAlerts>("/doi-soat/canh-bao-sla").then(setSlaAlerts).catch(() => {});
   }, [router]);
 
   useEffect(() => {
@@ -395,13 +428,14 @@ export default function AdminPage() {
               { id: "dispatch", label: "Xuất kho & Phân tuyến", icon: Truck },
               { id: "finance", label: "Tài chính & COD", icon: Wallet },
               { id: "sla", label: "Quản trị & SLA", icon: BarChart3 },
+              { id: "staff", label: "Nhân sự & Phân quyền", icon: Users },
               { id: "catalog", label: "Danh mục & Bưu cục", icon: Database },
             ].map((item) => {
               const Icon = item.icon;
               return (
                 <button
                   key={item.id}
-                  onClick={() => { setErrorMsg(""); setSection(item.id as "warehouse" | "dispatch" | "finance" | "sla" | "catalog"); }}
+                  onClick={() => { setErrorMsg(""); setSection(item.id as "warehouse" | "dispatch" | "finance" | "sla" | "catalog" | "staff"); }}
                   className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium transition ${
                     section === item.id ? "bg-[#FF5722] text-white" : "text-slate-300 hover:bg-slate-800"
                   }`}
@@ -699,18 +733,24 @@ export default function AdminPage() {
                           </div>
                           <p className="text-slate-600">{bb.moTa}</p>
                           {bb.trangThaiDuyet === "ChoXuLy" ? (
-                            <div className="grid grid-cols-2 gap-2 pt-1">
+                            <div className="grid grid-cols-3 gap-1.5 pt-1">
                               <button
                                 onClick={() => handleApproveIncident(bb.maBienBan, "DongGoiLai")}
-                                className="py-1.5 bg-slate-900 text-white rounded-lg font-semibold"
+                                className="py-1.5 bg-slate-900 text-white rounded-lg font-semibold text-[11px]"
                               >
                                 Đóng gói lại
                               </button>
                               <button
-                                onClick={() => handleApproveIncident(bb.maBienBan, "BoiThuong")}
-                                className="py-1.5 bg-red-600 text-white rounded-lg font-semibold"
+                                onClick={() => handleApproveIncident(bb.maBienBan, "TraLaiKienHang")}
+                                className="py-1.5 bg-amber-600 text-white rounded-lg font-semibold text-[11px]"
                               >
-                                Đền bù / Bồi thường
+                                Hoàn trả Shop
+                              </button>
+                              <button
+                                onClick={() => handleApproveIncident(bb.maBienBan, "BoiThuong")}
+                                className="py-1.5 bg-red-600 text-white rounded-lg font-semibold text-[11px]"
+                              >
+                                Bồi thường
                               </button>
                             </div>
                           ) : (
@@ -873,50 +913,105 @@ export default function AdminPage() {
               </div>
 
               {financeTab === "shipper" && (
-                <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
-                  {slips.length === 0 ? (
-                    <div className="p-8 text-center text-sm text-slate-400">Chưa có phiếu đối soát nào.</div>
-                  ) : (
-                    <table className="w-full text-sm text-left">
-                      <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
-                        <tr>
-                          <th className="px-4 py-3">Mã phiếu</th>
-                          <th className="px-4 py-3">Shipper</th>
-                          <th className="px-4 py-3">Phải nộp</th>
-                          <th className="px-4 py-3">Thực nộp</th>
-                          <th className="px-4 py-3">Còn thiếu</th>
-                          <th className="px-4 py-3">Trạng thái</th>
-                          <th className="px-4 py-3">Đối soát</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {slips.map((s) => (
-                          <tr key={s.maDoiSoat}>
-                            <td className="px-4 py-3 font-semibold">{s.maDoiSoat}</td>
-                            <td className="px-4 py-3">{s.maShipper}</td>
-                            <td className="px-4 py-3 font-medium">{formatVnd(s.tongPhaiNop)}</td>
-                            <td className="px-4 py-3">
-                              <input
-                                type="number"
-                                defaultValue={s.soTienThucNop || s.tongPhaiNop}
-                                onChange={(e) => setActualCash({ ...actualCash, [s.maDoiSoat]: Number(e.target.value) })}
-                                className="w-32 px-2 py-1 border border-slate-300 rounded-lg text-sm"
-                              />
-                            </td>
-                            <td className="px-4 py-3 text-red-600 font-semibold">{formatVnd(s.soTienThieu)}</td>
-                            <td className="px-4 py-3">
-                              <span className="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs font-semibold">{s.trangThai}</span>
-                            </td>
-                            <td className="px-4 py-3">
-                              <button onClick={() => handleReconcile(s)} className="px-3 py-1.5 bg-[#FF5722] text-white text-xs font-semibold rounded-lg">
-                                Khớp lệnh
-                              </button>
-                            </td>
+                <div className="space-y-4">
+                  <div className="bg-white p-4 rounded-2xl border border-slate-200 flex flex-wrap items-center justify-between gap-3">
+                    <div className="text-xs text-slate-600">
+                      Kiểm đếm tiền mặt COD cuối ca, ghi nợ hoặc mở khóa quyền nhận đơn cho Shipper sau khi tất toán (UC 6.1, UC 6.2).
+                    </div>
+                    <button
+                      onClick={async () => {
+                        setErrorMsg("");
+                        try {
+                          await apiFetch("/doi-soat/mo-khoa/NV_SHIP_01", { method: "POST" });
+                          setNotice("Đã mở khóa quyền nhận đơn cho NV_SHIP_01");
+                        } catch (err) {
+                          setErrorMsg(err instanceof Error ? err.message : "Không thể mở khóa Shipper");
+                        }
+                      }}
+                      className="px-3 py-2 bg-[#0F172A] text-white text-xs font-semibold rounded-xl flex items-center gap-1.5"
+                    >
+                      <Unlock className="w-3.5 h-3.5" /> Mở khóa NV_SHIP_01
+                    </button>
+                  </div>
+
+                  <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+                    {slips.length === 0 ? (
+                      <div className="p-8 text-center text-sm text-slate-400">Chưa có phiếu đối soát nào.</div>
+                    ) : (
+                      <table className="w-full text-sm text-left">
+                        <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
+                          <tr>
+                            <th className="px-4 py-3">Mã phiếu</th>
+                            <th className="px-4 py-3">Shipper</th>
+                            <th className="px-4 py-3">Phải nộp</th>
+                            <th className="px-4 py-3">Thực nộp</th>
+                            <th className="px-4 py-3">Còn thiếu</th>
+                            <th className="px-4 py-3">Trạng thái</th>
+                            <th className="px-4 py-3">Đối soát</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  )}
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {slips.map((s) => (
+                            <tr key={s.maDoiSoat}>
+                              <td className="px-4 py-3 font-semibold">{s.maDoiSoat}</td>
+                              <td className="px-4 py-3">{s.maShipper}</td>
+                              <td className="px-4 py-3 font-medium">{formatVnd(s.tongPhaiNop)}</td>
+                              <td className="px-4 py-3">
+                                <input
+                                  type="number"
+                                  defaultValue={s.soTienThucNop || s.tongPhaiNop}
+                                  onChange={(e) => setActualCash({ ...actualCash, [s.maDoiSoat]: Number(e.target.value) })}
+                                  className="w-32 px-2 py-1 border border-slate-300 rounded-lg text-sm"
+                                />
+                              </td>
+                              <td className="px-4 py-3 text-red-600 font-semibold">{formatVnd(s.soTienThieu)}</td>
+                              <td className="px-4 py-3">
+                                <span className="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs font-semibold">{s.trangThai}</span>
+                              </td>
+                              <td className="px-4 py-3 flex items-center gap-1.5">
+                                <button onClick={() => handleReconcile(s)} className="px-3 py-1.5 bg-[#FF5722] text-white text-xs font-semibold rounded-lg">
+                                  Khớp lệnh
+                                </button>
+                                {s.soTienThieu > 0 && (
+                                  <button
+                                    onClick={async () => {
+                                      try {
+                                        const up = await apiFetch<PhieuDoiSoatItem>(`/doi-soat/shipper/${s.maDoiSoat}/nop-bu-no`, {
+                                          method: "POST",
+                                          body: JSON.stringify({ soTienBu: s.soTienThieu }),
+                                        });
+                                        setSlips((prev) => prev.map((x) => (x.maDoiSoat === s.maDoiSoat ? up : x)));
+                                        setNotice(`Đã thu hồi đủ nợ cho phiếu ${s.maDoiSoat}`);
+                                      } catch (err) {
+                                        setErrorMsg(err instanceof Error ? err.message : "Lỗi nộp bù nợ");
+                                      }
+                                    }}
+                                    className="px-2.5 py-1.5 bg-amber-600 text-white text-xs font-semibold rounded-lg"
+                                  >
+                                    Thu bù nợ
+                                  </button>
+                                )}
+                                {s.trangThai !== "DaKhoaSo" && (
+                                  <button
+                                    onClick={async () => {
+                                      try {
+                                        const up = await apiFetch<PhieuDoiSoatItem>(`/doi-soat/shipper/${s.maDoiSoat}/chot-phieu`, { method: "POST" });
+                                        setSlips((prev) => prev.map((x) => (x.maDoiSoat === s.maDoiSoat ? up : x)));
+                                        setNotice(`Đã chốt khóa sổ phiếu ${s.maDoiSoat}`);
+                                      } catch {}
+                                    }}
+                                    className="px-2.5 py-1.5 bg-slate-900 text-white text-xs font-semibold rounded-lg"
+                                  >
+                                    Chốt sổ
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
                 </div>
               )}
 
@@ -945,7 +1040,17 @@ export default function AdminPage() {
                   </div>
 
                   <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
-                    <div className="p-4 border-b border-slate-100 font-bold text-sm">Bảng kê quyết toán Shop ({kyList[0]?.maKy || "Chưa có kỳ"})</div>
+                    <div className="p-4 border-b border-slate-100 flex items-center justify-between">
+                      <span className="font-bold text-sm">Bảng kê quyết toán Shop ({kyList[0]?.maKy || "Chưa có kỳ"})</span>
+                      {kyList[0]?.maKy && (
+                        <a
+                          href={`${API_BASE}/tai-chinh/ky-quyet-toan/${kyList[0].maKy}/xuat-csv`}
+                          className="px-3 py-1.5 bg-emerald-600 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5"
+                        >
+                          <Download className="w-3.5 h-3.5" /> Xuất CSV lệnh chi ngân hàng
+                        </a>
+                      )}
+                    </div>
                     {bangKeList.length === 0 ? (
                       <div className="p-8 text-center text-sm text-slate-400">Chưa có bảng kê quyết toán Shop nào.</div>
                     ) : (
@@ -1005,16 +1110,56 @@ export default function AdminPage() {
               {financeTab === "pricing" && (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   <div className="bg-white p-5 rounded-2xl border border-slate-200 space-y-3">
-                    <h2 className="font-bold text-base">Chi tiết Bảng giá cước đang áp dụng</h2>
+                    <h2 className="font-bold text-base">Chi tiết Bảng giá cước đang áp dụng (UC 1.4)</h2>
                     {chiTietGia.length === 0 ? (
                       <div className="text-xs text-slate-400">Chưa tải được bảng giá từ Backend.</div>
                     ) : (
                       <div className="space-y-2 text-xs">
-                        {chiTietGia.map((ct) => (
-                          <div key={`${ct.maVungTuyen}-${ct.maGoiDichVu}`} className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex justify-between items-center">
-                            <div>
-                              <div className="font-bold">{ct.maVungTuyen} · {ct.maGoiDichVu}</div>
-                              <div className="text-slate-500">Sàn: {formatVnd(ct.cuocSan)} · Vượt: {formatVnd(ct.donGiaVuotMoiKg)}/kg · COD: {ct.tyLePhiCod * 100}%</div>
+                        {chiTietGia.map((ct, idx) => (
+                          <div key={`${ct.maVungTuyen}-${ct.maGoiDichVu}`} className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+                            <div className="font-bold">{ct.maVungTuyen} · {ct.maGoiDichVu}</div>
+                            <div className="grid grid-cols-3 gap-2 items-center">
+                              <div>
+                                <div className="text-[10px] text-slate-500">Cước sàn (đ)</div>
+                                <input
+                                  type="number"
+                                  value={ct.cuocSan}
+                                  onChange={(e) => {
+                                    const val = Number(e.target.value);
+                                    setChiTietGia((prev) => prev.map((item, i) => (i === idx ? { ...item, cuocSan: val } : item)));
+                                  }}
+                                  className="w-full px-2 py-1 border border-slate-300 rounded-lg bg-white"
+                                />
+                              </div>
+                              <div>
+                                <div className="text-[10px] text-slate-500">Vượt cân/kg (đ)</div>
+                                <input
+                                  type="number"
+                                  value={ct.donGiaVuotMoiKg}
+                                  onChange={(e) => {
+                                    const val = Number(e.target.value);
+                                    setChiTietGia((prev) => prev.map((item, i) => (i === idx ? { ...item, donGiaVuotMoiKg: val } : item)));
+                                  }}
+                                  className="w-full px-2 py-1 border border-slate-300 rounded-lg bg-white"
+                                />
+                              </div>
+                              <button
+                                onClick={async () => {
+                                  setErrorMsg("");
+                                  try {
+                                    await apiFetch("/tai-chinh/bang-gia", {
+                                      method: "PUT",
+                                      body: JSON.stringify(ct),
+                                    });
+                                    setNotice(`Đã lưu biểu giá mới cho ${ct.maGoiDichVu}`);
+                                  } catch (err) {
+                                    setErrorMsg(err instanceof Error ? err.message : "Lỗi cập nhật bảng giá");
+                                  }
+                                }}
+                                className="mt-3.5 py-1.5 bg-[#0F172A] text-white font-semibold rounded-lg"
+                              >
+                                Lưu giá
+                              </button>
                             </div>
                           </div>
                         ))}
@@ -1027,13 +1172,38 @@ export default function AdminPage() {
                       <div className="text-xs text-slate-400">Chưa tải được tham số từ Backend.</div>
                     ) : (
                       <div className="space-y-2 text-xs">
-                        {thamSoList.map((ts) => (
+                        {thamSoList.map((ts, idx) => (
                           <div key={ts.maThamSo} className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex justify-between items-center gap-3">
                             <div>
                               <div className="font-bold">{ts.tenThamSo}</div>
                               <div className="text-slate-400">{ts.maThamSo}</div>
                             </div>
-                            <span className="px-2.5 py-1 rounded-lg bg-white border border-slate-300 font-mono font-bold">{ts.giaTri}</span>
+                            <div className="flex items-center gap-1.5">
+                              <input
+                                value={ts.giaTri}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setThamSoList((prev) => prev.map((item, i) => (i === idx ? { ...item, giaTri: val } : item)));
+                                }}
+                                className="w-24 px-2 py-1 rounded-lg bg-white border border-slate-300 font-mono font-bold text-right"
+                              />
+                              <button
+                                onClick={async () => {
+                                  try {
+                                    await apiFetch(`/tai-chinh/tham-so/${ts.maThamSo}`, {
+                                      method: "PUT",
+                                      body: JSON.stringify({ giaTri: ts.giaTri }),
+                                    });
+                                    setNotice(`Đã cập nhật tham số ${ts.maThamSo} = ${ts.giaTri}`);
+                                  } catch (err) {
+                                    setErrorMsg(err instanceof Error ? err.message : "Lỗi cập nhật tham số");
+                                  }
+                                }}
+                                className="px-2.5 py-1 bg-[#FF5722] text-white font-semibold rounded-lg"
+                              >
+                                Lưu
+                              </button>
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -1046,28 +1216,56 @@ export default function AdminPage() {
 
           {section === "sla" && (
             <div className="space-y-6">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <h1 className="text-2xl font-bold">Quản trị Doanh thu &amp; Báo cáo SLA</h1>
-                  <p className="text-sm text-slate-500">Tổng hợp doanh thu thực tế từ đơn hàng và giám sát KPI đội ngũ Shipper.</p>
+                  <h1 className="text-2xl font-bold">Quản trị Doanh thu, Cảnh báo Vận hành &amp; KPI</h1>
+                  <p className="text-sm text-slate-500">Tổng hợp doanh thu (UC 7.1), cảnh báo tồn kho &gt;24h / trễ SLA &gt;48h (UC 7.2) và xếp loại KPI (UC 7.3).</p>
                 </div>
-                <button
-                  onClick={async () => {
-                    try {
-                      const bc = await apiFetch<typeof baoCaoList[0]>("/tai-chinh/bao-cao-doanh-thu", {
-                        method: "POST",
-                        body: JSON.stringify({ maBuuCuc: user?.maBuuCuc || "BC_BENNGHE" }),
-                      });
-                      setBaoCaoList((prev) => [bc, ...prev]);
-                      setNotice(`Đã tổng hợp báo cáo doanh thu ${bc.maBaoCao}`);
-                    } catch (err) {
-                      setErrorMsg(err instanceof Error ? err.message : "Lỗi tổng hợp báo cáo");
-                    }
-                  }}
-                  className="px-4 py-2.5 bg-[#FF5722] text-white text-xs font-semibold rounded-xl"
-                >
-                  + Tổng hợp Báo cáo Doanh thu
-                </button>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={async () => {
+                      try {
+                        const bc = await apiFetch<typeof baoCaoList[0]>("/tai-chinh/bao-cao-doanh-thu", {
+                          method: "POST",
+                          body: JSON.stringify({ maBuuCuc: user?.maBuuCuc || "BC_BENNGHE" }),
+                        });
+                        setBaoCaoList((prev) => [bc, ...prev]);
+                        setNotice(`Đã tổng hợp báo cáo doanh thu ${bc.maBaoCao}`);
+                      } catch (err) {
+                        setErrorMsg(err instanceof Error ? err.message : "Lỗi tổng hợp báo cáo");
+                      }
+                    }}
+                    className="px-3.5 py-2 bg-[#FF5722] text-white text-xs font-semibold rounded-xl"
+                  >
+                    + Tổng hợp Doanh thu
+                  </button>
+                  <a
+                    href={`${API_BASE}/tai-chinh/bao-cao-doanh-thu/xuat-csv`}
+                    className="px-3.5 py-2 bg-emerald-600 text-white text-xs font-semibold rounded-xl flex items-center gap-1"
+                  >
+                    <Download className="w-3.5 h-3.5" /> CSV Doanh thu
+                  </a>
+                  <button
+                    onClick={async () => {
+                      try {
+                        const res = await apiFetch<KpiItem[]>("/doi-soat/kpi/tong-hop", { method: "POST" });
+                        setKpiList(res);
+                        setNotice("Đã tính toán lại bảng điểm KPI nhân sự từ đơn hàng thực tế!");
+                      } catch (err) {
+                        setErrorMsg(err instanceof Error ? err.message : "Lỗi tổng hợp KPI");
+                      }
+                    }}
+                    className="px-3.5 py-2 bg-[#0F172A] text-white text-xs font-semibold rounded-xl"
+                  >
+                    + Tính KPI tự động
+                  </button>
+                  <a
+                    href={`${API_BASE}/doi-soat/kpi/xuat-csv`}
+                    className="px-3.5 py-2 border border-slate-300 bg-white text-slate-700 text-xs font-semibold rounded-xl flex items-center gap-1"
+                  >
+                    <Download className="w-3.5 h-3.5" /> CSV KPI
+                  </a>
+                </div>
               </div>
 
               {baoCaoList.length > 0 && (
@@ -1091,28 +1289,268 @@ export default function AdminPage() {
                 </div>
               )}
 
+              {/* UC 7.2: Bảng Cảnh báo Tồn kho >24h & Trễ SLA >48h */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                <div className="bg-white p-5 rounded-2xl border border-slate-200 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h2 className="font-bold text-base flex items-center gap-2">
+                      <AlertTriangle className="w-4 h-4 text-amber-500" /> Cảnh báo Tồn kho &gt; 24 giờ ({slaAlerts.tonKhoQua24h.length})
+                    </h2>
+                    {slaAlerts.tonKhoQua24h.length === 0 && (
+                      <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-xs font-semibold">Vận hành an toàn</span>
+                    )}
+                  </div>
+                  {slaAlerts.tonKhoQua24h.length === 0 ? (
+                    <div className="text-xs text-slate-400 py-3">Không có kiện hàng nào lưu kho vượt quá 24 giờ.</div>
+                  ) : (
+                    <div className="space-y-2 max-h-48 overflow-y-auto text-xs">
+                      {slaAlerts.tonKhoQua24h.map((item) => (
+                        <div key={item.maVanDon} className="p-2.5 rounded-xl bg-amber-50 border border-amber-200 flex items-center justify-between">
+                          <div>
+                            <div className="font-bold text-amber-900">#{item.maVanDon} · {item.nguoiNhanTen}</div>
+                            <div className="text-amber-700">Kho: {item.maBuuCucHienTai} · Tồn {item.soGioTon}h ({item.trangThai})</div>
+                          </div>
+                          <button
+                            onClick={async () => {
+                              try {
+                                await apiFetch(`/doi-soat/canh-bao-sla/${item.maVanDon}/uu-tien`, {
+                                  method: "POST",
+                                  body: JSON.stringify({ maShipper: "NV_SHIP_01" }),
+                                });
+                                setSlaAlerts(await apiFetch<typeof slaAlerts>("/doi-soat/canh-bao-sla"));
+                                setNotice(`Đã điều phối ưu tiên giao ngay cho đơn #${item.maVanDon}`);
+                              } catch {}
+                            }}
+                            className="px-2.5 py-1.5 bg-amber-600 text-white font-semibold rounded-lg shrink-0"
+                          >
+                            Ưu tiên phát
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="bg-white p-5 rounded-2xl border border-slate-200 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h2 className="font-bold text-base flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4 text-red-500" /> Cảnh báo Trễ cam kết SLA ({slaAlerts.treSlaQua48h.length})
+                    </h2>
+                    {slaAlerts.treSlaQua48h.length === 0 && (
+                      <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-xs font-semibold">100% Đúng hạn</span>
+                    )}
+                  </div>
+                  {slaAlerts.treSlaQua48h.length === 0 ? (
+                    <div className="text-xs text-slate-400 py-3">Không có vận đơn nào vi phạm cam kết thời gian toàn trình SLA.</div>
+                  ) : (
+                    <div className="space-y-2 max-h-48 overflow-y-auto text-xs">
+                      {slaAlerts.treSlaQua48h.map((item) => (
+                        <div key={item.maVanDon} className="p-2.5 rounded-xl bg-red-50 border border-red-200 flex items-center justify-between">
+                          <div>
+                            <div className="font-bold text-red-900">#{item.maVanDon} · {item.nguoiNhanTen}</div>
+                            <div className="text-red-700">Trễ +{item.soGioTre}h · Shipper: {item.maShipper} ({item.trangThai})</div>
+                          </div>
+                          <button
+                            onClick={async () => {
+                              try {
+                                await apiFetch(`/doi-soat/canh-bao-sla/${item.maVanDon}/uu-tien`, {
+                                  method: "POST",
+                                  body: JSON.stringify({ maShipper: "NV_SHIP_01" }),
+                                });
+                                setSlaAlerts(await apiFetch<typeof slaAlerts>("/doi-soat/canh-bao-sla"));
+                                setNotice(`Đã gán ưu tiên xử lý SLA cho đơn #${item.maVanDon}`);
+                              } catch {}
+                            }}
+                            className="px-2.5 py-1.5 bg-red-600 text-white font-semibold rounded-lg shrink-0"
+                          >
+                            Điều phối gấp
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
               {kpiList.length === 0 ? (
                 <div className="bg-white p-8 rounded-2xl border border-slate-200 text-center text-sm text-slate-400">
                   Chưa có dữ liệu đánh giá KPI từ Backend.
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-                  {kpiList.map((k) => (
-                    <div key={k.maKpi} className="bg-white p-5 rounded-2xl border border-slate-200 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="font-bold text-base">{k.maShipper}</span>
-                        <span className="px-2.5 py-0.5 rounded-full bg-orange-50 text-[#FF5722] text-xs font-bold">Hạng {k.xepLoai}</span>
+                  {kpiList.map((k) => {
+                    const lowKpi = k.tyLeGiaoThanhCong < 85;
+                    return (
+                      <div key={k.maKpi} className={`p-5 rounded-2xl border space-y-2 ${lowKpi ? "bg-red-50 border-red-300" : "bg-white border-slate-200"}`}>
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-base">{k.maShipper}</span>
+                          <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${lowKpi ? "bg-red-600 text-white" : "bg-orange-50 text-[#FF5722]"}`}>
+                            Hạng {k.xepLoai} {lowKpi ? "(Cảnh báo <85%)" : ""}
+                          </span>
+                        </div>
+                        <div className="text-xs text-slate-500">Kỳ đánh giá: {k.kyDanhGia}</div>
+                        <div className="pt-2 border-t border-slate-100 text-sm space-y-1">
+                          <div className="flex justify-between"><span className="text-slate-500">Giao thành công:</span><strong className={lowKpi ? "text-red-700" : ""}>{k.tyLeGiaoThanhCong}%</strong></div>
+                          <div className="flex justify-between"><span className="text-slate-500">Đúng hẹn SLA:</span><strong>{k.tyLeDungHenSla}%</strong></div>
+                          <div className="flex justify-between"><span className="text-slate-500">Sản lượng TB:</span><strong>{k.sanLuongDonBinhQuan} đơn/ngày</strong></div>
+                        </div>
                       </div>
-                      <div className="text-xs text-slate-500">Kỳ đánh giá: {k.kyDanhGia}</div>
-                      <div className="pt-2 border-t border-slate-100 text-sm space-y-1">
-                        <div className="flex justify-between"><span className="text-slate-500">Giao thành công:</span><strong>{k.tyLeGiaoThanhCong}%</strong></div>
-                        <div className="flex justify-between"><span className="text-slate-500">Đúng hẹn SLA:</span><strong>{k.tyLeDungHenSla}%</strong></div>
-                        <div className="flex justify-between"><span className="text-slate-500">Sản lượng TB:</span><strong>{k.sanLuongDonBinhQuan} đơn/ngày</strong></div>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
+            </div>
+          )}
+
+          {/* UC 1.1: Quản lý Tài khoản Nội bộ & Phân quyền */}
+          {section === "staff" && (
+            <div className="space-y-6">
+              <div>
+                <h1 className="text-2xl font-bold">Quản lý Tài khoản Nội bộ &amp; Phân quyền (UC 1.1)</h1>
+                <p className="text-sm text-slate-500">Thêm nhân sự mới, điều chuyển bưu cục, khóa tài khoản (chặn nếu còn đơn/nợ COD) và cấp lại mật khẩu tạm.</p>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <form
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    setErrorMsg("");
+                    try {
+                      const res = await apiFetch<{ maNhanVien: string; matKhauTam: string }>("/nhan-su", {
+                        method: "POST",
+                        body: JSON.stringify({
+                          maNhanVien: stCode,
+                          hoTen: stName,
+                          soDienThoai: stPhone,
+                          email: stEmail,
+                          maBuuCuc: stBuuCuc,
+                          loaiNhanVien: stRole,
+                          bienSoXe: stPlate,
+                        }),
+                      });
+                      setStaffList(await apiFetch<typeof staffList>("/nhan-su"));
+                      setStCode("");
+                      setStName("");
+                      setStPhone("");
+                      setStEmail("");
+                      setNotice(`Đã tạo nhân sự ${res.maNhanVien} — Mật khẩu tạm: ${res.matKhauTam}`);
+                    } catch (err) {
+                      setErrorMsg(err instanceof Error ? err.message : "Lỗi tạo nhân sự");
+                    }
+                  }}
+                  className="bg-white p-5 rounded-2xl border border-slate-200 space-y-3 h-fit"
+                >
+                  <h2 className="font-bold text-base">Thêm tài khoản nhân sự</h2>
+                  <input value={stCode} onChange={(e) => setStCode(e.target.value)} placeholder="Mã NV (VD: NV_SHIP_02, để trống tự sinh)" className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs" />
+                  <input required value={stName} onChange={(e) => setStName(e.target.value)} placeholder="Họ và tên *" className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs" />
+                  <input required value={stPhone} onChange={(e) => setStPhone(e.target.value)} placeholder="Số điện thoại *" className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs" />
+                  <input type="email" value={stEmail} onChange={(e) => setStEmail(e.target.value)} placeholder="Email công vụ" className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs" />
+                  <div className="grid grid-cols-2 gap-2">
+                    <select value={stRole} onChange={(e) => setStRole(e.target.value)} className="px-2.5 py-2 border border-slate-300 rounded-xl text-xs bg-white">
+                      <option value="Quay">Nhân viên Quầy</option>
+                      <option value="Shipper">Shipper</option>
+                      <option value="QuanTri">Quản lý / Admin</option>
+                    </select>
+                    <select value={stBuuCuc} onChange={(e) => setStBuuCuc(e.target.value)} className="px-2.5 py-2 border border-slate-300 rounded-xl text-xs bg-white">
+                      {buuCucList.map((b) => <option key={b.maBuuCuc} value={b.maBuuCuc}>{b.maBuuCuc}</option>)}
+                    </select>
+                  </div>
+                  {stRole === "Shipper" && (
+                    <input value={stPlate} onChange={(e) => setStPlate(e.target.value)} placeholder="Biển số xe (VD: 59-X1 123.45)" className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs" />
+                  )}
+                  <button type="submit" className="w-full py-2.5 bg-[#FF5722] text-white font-semibold rounded-xl text-xs">
+                    + Khởi tạo &amp; Cấp quyền
+                  </button>
+                </form>
+
+                <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-200 overflow-hidden">
+                  <div className="p-4 border-b border-slate-100 font-bold text-sm">Danh sách Nhân sự nội bộ ({staffList.length})</div>
+                  <table className="w-full text-xs text-left">
+                    <thead className="bg-slate-50 text-slate-500 uppercase">
+                      <tr>
+                        <th className="px-4 py-3">Nhân viên</th>
+                        <th className="px-4 py-3">Vai trò</th>
+                        <th className="px-4 py-3">Bưu cục</th>
+                        <th className="px-4 py-3">Trạng thái</th>
+                        <th className="px-4 py-3">Thao tác</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {staffList.map((st) => {
+                        const isLocked = st.trangThai === "Locked";
+                        return (
+                          <tr key={st.maNhanVien}>
+                            <td className="px-4 py-3">
+                              <div className="font-bold text-[#0F172A]">{st.hoTen || st.maNhanVien}</div>
+                              <div className="text-slate-400">{st.maNhanVien} · {st.soDienThoai}</div>
+                            </td>
+                            <td className="px-4 py-3 font-semibold">{st.loaiNhanVien}</td>
+                            <td className="px-4 py-3">
+                              <select
+                                value={st.maBuuCuc}
+                                onChange={async (e) => {
+                                  const nextBc = e.target.value;
+                                  setErrorMsg("");
+                                  try {
+                                    await apiFetch(`/nhan-su/${st.maNhanVien}`, {
+                                      method: "PUT",
+                                      body: JSON.stringify({ maBuuCuc: nextBc }),
+                                    });
+                                    setStaffList(await apiFetch<typeof staffList>("/nhan-su"));
+                                    setNotice(`Đã điều chuyển ${st.maNhanVien} sang ${nextBc}`);
+                                  } catch (err) {
+                                    setErrorMsg(err instanceof Error ? err.message : "Từ chối điều chuyển");
+                                  }
+                                }}
+                                className="px-2 py-1 border border-slate-300 rounded-lg bg-white"
+                              >
+                                {buuCucList.map((b) => <option key={b.maBuuCuc} value={b.maBuuCuc}>{b.maBuuCuc}</option>)}
+                              </select>
+                            </td>
+                            <td className="px-4 py-3">
+                              <span className={`px-2 py-0.5 rounded-full font-semibold ${isLocked ? "bg-red-100 text-red-700" : "bg-emerald-50 text-emerald-700"}`}>
+                                {st.trangThai || "Active"}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 flex items-center gap-1.5">
+                              <button
+                                onClick={async () => {
+                                  setErrorMsg("");
+                                  try {
+                                    await apiFetch(`/nhan-su/${st.maNhanVien}`, {
+                                      method: "PUT",
+                                      body: JSON.stringify({ trangThai: isLocked ? "Active" : "Locked" }),
+                                    });
+                                    setStaffList(await apiFetch<typeof staffList>("/nhan-su"));
+                                    setNotice(`${isLocked ? "Đã mở khóa" : "Đã khóa"} tài khoản ${st.maNhanVien}`);
+                                  } catch (err) {
+                                    setErrorMsg(err instanceof Error ? err.message : "Không thể khóa tài khoản");
+                                  }
+                                }}
+                                className={`px-2.5 py-1 rounded-lg font-semibold text-white ${isLocked ? "bg-emerald-600" : "bg-red-600"}`}
+                              >
+                                {isLocked ? "Mở khóa" : "Khóa TK"}
+                              </button>
+                              <button
+                                onClick={async () => {
+                                  try {
+                                    const res = await apiFetch<{ matKhauTam: string }>(`/nhan-su/${st.maNhanVien}/cap-lai-mat-khau`, { method: "POST" });
+                                    setNotice(`Mật khẩu tạm mới của ${st.maNhanVien}: ${res.matKhauTam}`);
+                                  } catch {}
+                                }}
+                                title="Cấp lại mật khẩu tạm"
+                                className="p-1.5 rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50"
+                              >
+                                <KeyRound className="w-3.5 h-3.5" />
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>
           )}
 
