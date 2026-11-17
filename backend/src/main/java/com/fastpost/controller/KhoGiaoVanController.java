@@ -21,6 +21,9 @@ public class KhoGiaoVanController {
     private final TieuTuyenRepository tieuTuyenRepo;
     private final ChiTietTieuTuyenRepository ctTieuTuyenRepo;
     private final BuuCucRepository buuCucRepo;
+    private final ViCongNoShipperRepository viRepo;
+    private final ShipperRepository shipperRepo;
+    private final ThamSoRepository thamSoRepo;
 
     public KhoGiaoVanController(
             PhieuXuatKhoRepository phieuXuatRepo,
@@ -30,7 +33,10 @@ public class KhoGiaoVanController {
             TuyenGiaoHangRepository tuyenRepo,
             TieuTuyenRepository tieuTuyenRepo,
             ChiTietTieuTuyenRepository ctTieuTuyenRepo,
-            BuuCucRepository buuCucRepo) {
+            BuuCucRepository buuCucRepo,
+            ViCongNoShipperRepository viRepo,
+            ShipperRepository shipperRepo,
+            ThamSoRepository thamSoRepo) {
         this.phieuXuatRepo = phieuXuatRepo;
         this.ctPhieuXuatRepo = ctPhieuXuatRepo;
         this.donHangRepo = donHangRepo;
@@ -39,6 +45,9 @@ public class KhoGiaoVanController {
         this.tieuTuyenRepo = tieuTuyenRepo;
         this.ctTieuTuyenRepo = ctTieuTuyenRepo;
         this.buuCucRepo = buuCucRepo;
+        this.viRepo = viRepo;
+        this.shipperRepo = shipperRepo;
+        this.thamSoRepo = thamSoRepo;
     }
 
     @GetMapping("/buu-cuc")
@@ -90,6 +99,44 @@ public class KhoGiaoVanController {
         List<String> codes = req.dsMaVanDon() != null ? req.dsMaVanDon() : List.of();
         if (codes.isEmpty()) {
             return ResponseEntity.badRequest().body(Map.of("message", "Danh sách đơn xuất kho không được trống"));
+        }
+
+        String shipperId = req.maShipper() != null ? req.maShipper() : "NV_SHIP_01";
+        BigDecimal debtLimit = thamSoRepo.findById("HAN_MUC_NO_SHIPPER")
+                .map(t -> new BigDecimal(t.getGiaTri()))
+                .orElse(BigDecimal.valueOf(3_000_000));
+
+        // UC 5.1 branch 4a & UC 6.2: Kiểm tra công nợ Shipper (> 3tr hoặc nợ quá 24h hoặc đang khóa nhận đơn)
+        Optional<ViCongNoShipper> viOpt = viRepo.findByMaShipper(shipperId);
+        if (viOpt.isPresent()) {
+            ViCongNoShipper vi = viOpt.get();
+            boolean over24h = vi.getTongNoLuyKe().compareTo(BigDecimal.ZERO) > 0
+                    && vi.getThoiDiemPhatSinhNo() != null
+                    && vi.getThoiDiemPhatSinhNo().isBefore(LocalDateTime.now().minusHours(24));
+            boolean overLimit = vi.getTongNoLuyKe().compareTo(debtLimit) >= 0;
+            if (Boolean.TRUE.equals(vi.getDaKhoaNhanDon()) || overLimit || over24h) {
+                vi.setDaKhoaNhanDon(true);
+                viRepo.save(vi);
+                shipperRepo.findById(shipperId).ifPresent(s -> {
+                    s.setTrangThaiNhanDon("KhoaTamThoi");
+                    shipperRepo.save(s);
+                });
+                return ResponseEntity.badRequest().body(Map.of(
+                        "message", "Từ chối bàn giao: Shipper " + shipperId + " đang bị khóa nhận đơn do vi phạm công nợ COD (" + vi.getTongNoLuyKe() + "đ)"));
+            }
+        }
+
+        // UC 4.4 branch 5b: Chặn xuất kho đơn đang TamGiuChoXuLy / DaHuy / DaBoiThuong
+        for (String code : codes) {
+            Optional<DonHang> dhCheck = donHangRepo.findById(code.trim());
+            if (dhCheck.isEmpty()) {
+                return ResponseEntity.badRequest().body(Map.of("message", "Không tìm thấy vận đơn: " + code.trim()));
+            }
+            String st = dhCheck.get().getTrangThai();
+            if ("TamGiuChoXuLy".equals(st) || "DaHuy".equals(st) || "DaBoiThuong".equals(st) || "DaChuyenHoan".equals(st)) {
+                return ResponseEntity.badRequest().body(Map.of(
+                        "message", "Từ chối xuất kho: Đơn " + code.trim() + " đang ở trạng thái " + st + " (cần xử lý biên bản bất thường trước)"));
+            }
         }
 
         String maPhieu = "PXK-" + (10000 + new Random().nextInt(89999));
