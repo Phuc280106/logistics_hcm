@@ -28,6 +28,9 @@ export default function CounterPage() {
   const [c, setC] = useState<number>(0);
   const [fragile, setFragile] = useState(false);
   const [cod, setCod] = useState<number>(0);
+  const [nguoiTraCuoc, setNguoiTraCuoc] = useState<"NguoiGui" | "NguoiNhan">("NguoiGui");
+  const [hinhThucThanhToan, setHinhThucThanhToan] = useState<"VietQR" | "TienMat">("VietQR");
+  const [lookupPrintCode, setLookupPrintCode] = useState("");
 
   const [fee, setFee] = useState({
     trongLuongTinhCuoc: 1,
@@ -65,8 +68,45 @@ export default function CounterPage() {
     }
   }
 
+  async function handleLookupForReprint() {
+    if (!lookupPrintCode.trim()) return;
+    setErrorMsg("");
+    try {
+      const res = await apiFetch<{
+        donHang: {
+          maVanDon: string;
+          nguoiNhanTen: string;
+          nguoiNhanSdt: string;
+          diaChiGiaoChiTiet: string;
+          phuongXaGiao: string;
+          quanHuyenGiao: string;
+          tienCod: number;
+          trongLuongTinhCuoc: number;
+          tongCuoc: number;
+        };
+      }>(`/don-hang/${lookupPrintCode.trim()}`);
+      const dh = res.donHang;
+      setCreatedCode(dh.maVanDon);
+      setReceiverName(dh.nguoiNhanTen);
+      setReceiverPhone(dh.nguoiNhanSdt);
+      setAddress(dh.diaChiGiaoChiTiet);
+      setWard(dh.phuongXaGiao);
+      setDistrict(dh.quanHuyenGiao);
+      setCod(Number(dh.tienCod || 0));
+      setFee((prev) => ({ ...prev, trongLuongTinhCuoc: dh.trongLuongTinhCuoc, tongCuoc: Number(dh.tongCuoc || 0) }));
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Không tìm thấy vận đơn để in lại");
+    }
+  }
+
   async function handlePrintLabel() {
+    setErrorMsg("");
     if (createdCode) {
+      const prevPrints = printLogs.filter((l) => l.maVanDon === createdCode).length;
+      if (prevPrints > 0 && !reprintReason.trim()) {
+        setErrorMsg("Vui lòng nhập lý do in lại tem mã vạch (VD: Tem rách / Mờ nét).");
+        return;
+      }
       try {
         await apiFetch(`/don-hang/${createdCode}/in-tem`, {
           method: "POST",
@@ -77,8 +117,9 @@ export default function CounterPage() {
         });
         setReprintReason("");
         await loadPrintLogs();
-      } catch {
-        // still allow print preview
+      } catch (err) {
+        setErrorMsg(err instanceof Error ? err.message : "Không thể in tem");
+        return;
       }
     }
     window.print();
@@ -154,18 +195,24 @@ export default function CounterPage() {
           chieuCao: c || 0,
           laHangDeVo: fragile,
           tienCod: cod || 0,
+          nguoiTraCuoc,
+          hinhThucThanhToan,
           taiQuay: true,
         }),
       });
       setCreatedCode(res.maVanDon);
-      try {
-        const qrRes = await apiFetch<{ giaoDich: { maGiaoDichQr: string }; qrUrl: string }>(
-          `/don-hang/${res.maVanDon}/vietqr`,
-          { method: "POST" }
-        );
-        setQrInfo({ maGiaoDichQr: qrRes.giaoDich.maGiaoDichQr, qrUrl: qrRes.qrUrl });
-      } catch {}
-      setStep(2);
+      if (nguoiTraCuoc === "NguoiGui" && hinhThucThanhToan === "VietQR") {
+        try {
+          const qrRes = await apiFetch<{ giaoDich: { maGiaoDichQr: string }; qrUrl: string }>(
+            `/don-hang/${res.maVanDon}/vietqr`,
+            { method: "POST" }
+          );
+          setQrInfo({ maGiaoDichQr: qrRes.giaoDich.maGiaoDichQr, qrUrl: qrRes.qrUrl });
+        } catch {}
+        setStep(2);
+      } else {
+        setStep(3);
+      }
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : "Không thể kết nối Backend để tạo đơn hàng");
     } finally {
@@ -472,6 +519,22 @@ export default function CounterPage() {
                       <option value="GDV_HOATOC">FastPost Hỏa Tốc</option>
                     </select>
                   </div>
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <div>
+                      <label className="block text-[11px] font-medium text-slate-600 mb-1">Người trả cước</label>
+                      <select value={nguoiTraCuoc} onChange={(e) => setNguoiTraCuoc(e.target.value as "NguoiGui" | "NguoiNhan")} className="w-full px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium">
+                        <option value="NguoiGui">Người gửi trả</option>
+                        <option value="NguoiNhan">Người nhận trả</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-medium text-slate-600 mb-1">Hình thức TT</label>
+                      <select value={hinhThucThanhToan} onChange={(e) => setHinhThucThanhToan(e.target.value as "VietQR" | "TienMat")} className="w-full px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium">
+                        <option value="VietQR">VietQR động</option>
+                        <option value="TienMat">Tiền mặt</option>
+                      </select>
+                    </div>
+                  </div>
                   <div className="space-y-2.5 text-sm border-t border-slate-100 pt-3">
                     <div className="flex justify-between"><span className="text-slate-500">TL tính cước</span><span className="font-medium">{fee.trongLuongTinhCuoc} kg</span></div>
                     <div className="flex justify-between"><span className="text-slate-500">Cước sàn</span><span>{formatVnd(fee.cuocSan)}</span></div>
@@ -534,11 +597,32 @@ export default function CounterPage() {
           {step === 3 && (
             <div className="max-w-lg mx-auto bg-white p-8 rounded-2xl border border-slate-200 space-y-4">
               <h2 className="text-xl font-bold text-center">Xem trước &amp; In tem mã vạch</h2>
+              <div className="flex gap-2">
+                <input
+                  value={lookupPrintCode}
+                  onChange={(e) => setLookupPrintCode(e.target.value)}
+                  placeholder="Tra cứu mã vận đơn để in lại tem (UC 3.3.3)..."
+                  className="flex-1 px-3 py-2 border border-slate-300 rounded-xl text-xs"
+                />
+                <button type="button" onClick={handleLookupForReprint} className="px-3 py-2 bg-[#0F172A] text-white rounded-xl text-xs font-semibold">
+                  Tải đơn
+                </button>
+              </div>
               <div className="border-2 border-slate-900 rounded-xl p-5 space-y-2 text-sm">
-                <div className="flex justify-between font-bold border-b border-slate-300 pb-2">
+                <div className="flex justify-between items-center font-bold border-b border-slate-300 pb-2">
                   <span>FASTPOST EXPRESS</span>
-                  <span>{createdCode ? `#${createdCode}` : "#---"}</span>
+                  <div className="flex items-center gap-2">
+                    {createdCode && printLogs.some((l) => l.maVanDon === createdCode) && (
+                      <span className="px-1.5 py-0.5 bg-amber-100 text-amber-800 rounded text-[10px]">BẢN IN LẠI</span>
+                    )}
+                    <span>{createdCode ? `#${createdCode}` : "#---"}</span>
+                  </div>
                 </div>
+                {createdCode && (
+                  <div className="py-1.5 text-center font-mono tracking-[0.25em] text-xs bg-slate-50 rounded border border-slate-200">
+                    ||| |||| || ||| |||| ||| || {createdCode}
+                  </div>
+                )}
                 <div><strong>Người nhận:</strong> {receiverName || "---"} ({receiverPhone || "---"})</div>
                 <div><strong>Địa chỉ:</strong> {address || "---"}, {ward}, {district}</div>
                 <div className="flex justify-between pt-2 border-t border-slate-200">
