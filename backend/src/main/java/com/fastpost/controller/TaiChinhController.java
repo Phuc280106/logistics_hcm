@@ -2,11 +2,14 @@ package com.fastpost.controller;
 
 import com.fastpost.entity.*;
 import com.fastpost.repository.*;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.*;
 
@@ -20,6 +23,8 @@ public class TaiChinhController {
     private final BangKeQuyetToanShopRepository bangKeRepo;
     private final BaoCaoDoanhThuRepository baoCaoRepo;
     private final DonHangRepository donHangRepo;
+    private final TaiKhoanNganHangRepository tkNganHangRepo;
+    private final LichSuHanhTrinhRepository lichSuRepo;
 
     public TaiChinhController(
             ThamSoRepository thamSoRepo,
@@ -28,7 +33,9 @@ public class TaiChinhController {
             KyQuyetToanCodRepository kyRepo,
             BangKeQuyetToanShopRepository bangKeRepo,
             BaoCaoDoanhThuRepository baoCaoRepo,
-            DonHangRepository donHangRepo) {
+            DonHangRepository donHangRepo,
+            TaiKhoanNganHangRepository tkNganHangRepo,
+            LichSuHanhTrinhRepository lichSuRepo) {
         this.thamSoRepo = thamSoRepo;
         this.bangGiaRepo = bangGiaRepo;
         this.ctBangGiaRepo = ctBangGiaRepo;
@@ -36,6 +43,8 @@ public class TaiChinhController {
         this.bangKeRepo = bangKeRepo;
         this.baoCaoRepo = baoCaoRepo;
         this.donHangRepo = donHangRepo;
+        this.tkNganHangRepo = tkNganHangRepo;
+        this.lichSuRepo = lichSuRepo;
     }
 
     public record UpdateThamSoRequest(String giaTri) {}
@@ -61,7 +70,7 @@ public class TaiChinhController {
         }).orElse(ResponseEntity.notFound().build());
     }
 
-    // 2. Bảng giá cước
+    // 2. Bảng giá cước (UC 1.4)
     @GetMapping("/bang-gia")
     public Map<String, Object> getActiveBangGia() {
         Optional<BangGiaCuoc> bgOpt = bangGiaRepo.findFirstByDangKichHoatTrueOrderByNgayHieuLucDesc();
@@ -78,6 +87,13 @@ public class TaiChinhController {
     @PutMapping("/bang-gia")
     @Transactional
     public ResponseEntity<?> updateChiTietBangGia(@RequestBody UpdateBangGiaRequest req) {
+        // UC 1.4 branch 8a: không cho phép đơn giá hoặc khối lượng âm
+        if ((req.cuocSan() != null && req.cuocSan().compareTo(BigDecimal.ZERO) < 0)
+                || (req.donGiaVuotMoiKg() != null && req.donGiaVuotMoiKg().compareTo(BigDecimal.ZERO) < 0)
+                || (req.khoiLuongSanKg() != null && req.khoiLuongSanKg() <= 0)
+                || (req.phuPhiDeVo() != null && req.phuPhiDeVo().compareTo(BigDecimal.ZERO) < 0)) {
+            return ResponseEntity.badRequest().body(Map.of("message", "Đơn giá cước và nấc khối lượng phải lớn hơn hoặc bằng 0"));
+        }
         ChiTietBangGiaId id = new ChiTietBangGiaId(req.maBangGia(), req.maVungTuyen(), req.maGoiDichVu());
         return ctBangGiaRepo.findById(id).map(ct -> {
             if (req.cuocSan() != null) ct.setCuocSan(req.cuocSan());
@@ -89,7 +105,7 @@ public class TaiChinhController {
         }).orElse(ResponseEntity.notFound().build());
     }
 
-    // 3. Quyết toán COD Shop
+    // 3. Quyết toán COD Shop (UC 6.3)
     @GetMapping("/ky-quyet-toan")
     public List<KyQuyetToanCod> listKy() {
         return kyRepo.findAllByOrderByTuNgayDesc();
@@ -106,34 +122,50 @@ public class TaiChinhController {
         KyQuyetToanCod ky = new KyQuyetToanCod();
         ky.setMaKy("KY-" + System.currentTimeMillis());
         ky.setMaQuanLyLap(req.maQuanLyLap() != null ? req.maQuanLyLap() : "NV_ADMIN_01");
-        ky.setLoaiKyThanhToan(req.loaiKyThanhToan() != null ? req.loaiKyThanhToan() : "Tuan");
+        ky.setLoaiKyThanhToan(req.loaiKyThanhToan() != null ? req.loaiKyThanhToan() : "T2_T4_T6");
         ky.setTuNgay(LocalDateTime.now().minusDays(7));
         ky.setDenNgay(LocalDateTime.now());
         ky.setTrangThai("DangXuLy");
         kyRepo.save(ky);
 
         List<DonHang> delivered = donHangRepo.findByTrangThaiOrderByNgayTaoDesc("DaGiaoThanhCong");
-        Map<String, List<DonHang>> byShop = new HashMap<>();
+        Map<String, List<DonHang>> byShop = new LinkedHashMap<>();
         for (DonHang dh : delivered) {
             byShop.computeIfAbsent(dh.getMaKhachHang(), k -> new ArrayList<>()).add(dh);
         }
 
         List<BangKeQuyetToanShop> bangKeList = new ArrayList<>();
         for (Map.Entry<String, List<DonHang>> entry : byShop.entrySet()) {
+            String maKh = entry.getKey();
             BigDecimal sumCod = BigDecimal.ZERO;
             BigDecimal sumCuoc = BigDecimal.ZERO;
             for (DonHang dh : entry.getValue()) {
                 sumCod = sumCod.add(dh.getTienCod() != null ? dh.getTienCod() : BigDecimal.ZERO);
-                sumCuoc = sumCuoc.add(dh.getTongCuoc() != null ? dh.getTongCuoc() : BigDecimal.ZERO);
+                if ("NguoiGui".equalsIgnoreCase(dh.getNguoiTraCuoc())) {
+                    sumCuoc = sumCuoc.add(dh.getTongCuoc() != null ? dh.getTongCuoc() : BigDecimal.ZERO);
+                }
             }
+            BigDecimal thucTra = sumCod.subtract(sumCuoc);
+
+            List<TaiKhoanNganHang> banks = tkNganHangRepo.findByMaKhachHangOrderByLaMacDinhCodDesc(maKh);
+            String maTk = banks.isEmpty() ? null : banks.get(0).getMaTkNganHang();
+
             BangKeQuyetToanShop bk = new BangKeQuyetToanShop();
-            bk.setMaBangKe("BK-" + entry.getKey() + "-" + (100 + new Random().nextInt(899)));
+            bk.setMaBangKe("BK-" + maKh + "-" + (100 + new Random().nextInt(899)));
             bk.setMaKy(ky.getMaKy());
-            bk.setMaKhachHang(entry.getKey());
+            bk.setMaKhachHang(maKh);
+            bk.setMaTaiKhoanNganHang(maTk);
             bk.setTongCod(sumCod);
             bk.setTongCuocTru(sumCuoc);
-            bk.setThucTra(sumCod.subtract(sumCuoc));
-            bk.setTrangThaiThanhToan("ChoThanhToan");
+            bk.setThucTra(thucTra);
+            // UC 6.3 branch 3a & 4a
+            if (thucTra.compareTo(BigDecimal.ZERO) < 0) {
+                bk.setTrangThaiThanhToan("NoCuocKySau");
+            } else if (maTk == null) {
+                bk.setTrangThaiThanhToan("ChoBoSungTK");
+            } else {
+                bk.setTrangThaiThanhToan("ChoThanhToan");
+            }
             bangKeRepo.save(bk);
             bangKeList.add(bk);
         }
@@ -146,11 +178,68 @@ public class TaiChinhController {
         return bangKeRepo.findById(maBangKe).map(bk -> {
             bk.setTrangThaiThanhToan("DaThanhToan");
             bk.setMaGiaoDichNganHang(req.maGiaoDichNganHang() != null ? req.maGiaoDichNganHang() : "FT" + System.currentTimeMillis());
-            return ResponseEntity.ok(bangKeRepo.save(bk));
+            BangKeQuyetToanShop saved = bangKeRepo.save(bk);
+
+            // State Diagram DonHang biến cố 22 quyetToanCOD(): DaGiaoThanhCong -> DaQuyetToanCOD
+            List<DonHang> shopOrders = donHangRepo.findByMaKhachHangOrderByNgayTaoDesc(bk.getMaKhachHang());
+            for (DonHang dh : shopOrders) {
+                if ("DaGiaoThanhCong".equals(dh.getTrangThai())) {
+                    dh.setTrangThai("DaQuyetToanCOD");
+                    donHangRepo.save(dh);
+
+                    LichSuHanhTrinh ls = new LichSuHanhTrinh();
+                    ls.setMaHanhTrinh("HT-" + UUID.randomUUID().toString().substring(0, 8));
+                    ls.setMaVanDon(dh.getMaVanDon());
+                    ls.setMaBuuCuc(dh.getMaBuuCucHienTai());
+                    ls.setMaNhanVienThucHien("NV_ADMIN_01");
+                    ls.setThoiGian(LocalDateTime.now());
+                    ls.setTrangThaiGhiNhan("DaQuyetToanCOD");
+                    ls.setMoTaChiTiet("Đã chuyển khoản quyết toán COD về tài khoản Shop (Mã GD: " + saved.getMaGiaoDichNganHang() + ")");
+                    lichSuRepo.save(ls);
+                }
+            }
+
+            // Nếu toàn bộ bảng kê trong kỳ đã xử lý -> đóng kỳ quyết toán
+            boolean allDone = bangKeRepo.findByMaKy(bk.getMaKy()).stream()
+                    .allMatch(x -> "DaThanhToan".equals(x.getTrangThaiThanhToan()) || "NoCuocKySau".equals(x.getTrangThaiThanhToan()));
+            if (allDone) {
+                kyRepo.findById(bk.getMaKy()).ifPresent(ky -> {
+                    ky.setTrangThai("DaHoanTat");
+                    kyRepo.save(ky);
+                });
+            }
+
+            return ResponseEntity.ok(saved);
         }).orElse(ResponseEntity.notFound().build());
     }
 
-    // 4. Báo cáo Doanh thu thật từ bảng don_hang
+    @GetMapping("/ky-quyet-toan/{maKy}/xuat-csv")
+    public ResponseEntity<byte[]> exportBangKeCsv(@PathVariable String maKy) {
+        StringBuilder sb = new StringBuilder("\uFEFFMaBangKe,MaKy,MaKhachHang,MaTKNganHang,SoTaiKhoan,ChuTaiKhoan,TongCOD,TongCuocTru,ThucTra,TrangThai,MaGDNganHang\n");
+        for (BangKeQuyetToanShop bk : bangKeRepo.findByMaKy(maKy)) {
+            String stk = "";
+            String chuTk = "";
+            if (bk.getMaTaiKhoanNganHang() != null) {
+                Optional<TaiKhoanNganHang> tkOpt = tkNganHangRepo.findById(bk.getMaTaiKhoanNganHang());
+                if (tkOpt.isPresent()) {
+                    stk = tkOpt.get().getSoTaiKhoan();
+                    chuTk = tkOpt.get().getTenChuTaiKhoan();
+                }
+            }
+            sb.append(String.format("%s,%s,%s,%s,%s,\"%s\",%s,%s,%s,%s,%s\n",
+                    bk.getMaBangKe(), bk.getMaKy(), bk.getMaKhachHang(),
+                    bk.getMaTaiKhoanNganHang() != null ? bk.getMaTaiKhoanNganHang() : "",
+                    stk, chuTk, bk.getTongCod(), bk.getTongCuocTru(), bk.getThucTra(),
+                    bk.getTrangThaiThanhToan(),
+                    bk.getMaGiaoDichNganHang() != null ? bk.getMaGiaoDichNganHang() : ""));
+        }
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"lenh_chuyen_khoan_cod_" + maKy + ".csv\"")
+                .contentType(new MediaType("text", "csv", StandardCharsets.UTF_8))
+                .body(sb.toString().getBytes(StandardCharsets.UTF_8));
+    }
+
+    // 4. Báo cáo Doanh thu thật từ bảng don_hang (UC 7.1)
     @GetMapping("/bao-cao-doanh-thu")
     public List<BaoCaoDoanhThu> listBaoCao() {
         return baoCaoRepo.findAllByOrderByDenNgayDesc();
@@ -166,13 +255,14 @@ public class TaiChinhController {
         int qrCount = 0;
 
         for (DonHang dh : all) {
+            if ("DaHuy".equals(dh.getTrangThai())) continue;
             doanhThu = doanhThu.add(dh.getTongCuoc() != null ? dh.getTongCuoc() : BigDecimal.ZERO);
             codTotal = codTotal.add(dh.getTienCod() != null ? dh.getTienCod() : BigDecimal.ZERO);
             if ("VietQR".equalsIgnoreCase(dh.getHinhThucThanhToan())) qrCount++;
             else cashCount++;
         }
 
-        int total = all.size();
+        int total = cashCount + qrCount;
         double cashPct = total == 0 ? 0.0 : Math.round((cashCount * 1000.0) / total) / 10.0;
         double qrPct = total == 0 ? 0.0 : Math.round((qrCount * 1000.0) / total) / 10.0;
 
@@ -187,5 +277,20 @@ public class TaiChinhController {
         bc.setTyLeTienMat(cashPct);
         bc.setTyLeVietQr(qrPct);
         return baoCaoRepo.save(bc);
+    }
+
+    @GetMapping("/bao-cao-doanh-thu/xuat-csv")
+    public ResponseEntity<byte[]> exportBaoCaoCsv() {
+        StringBuilder sb = new StringBuilder("\uFEFFMaBaoCao,MaBuuCuc,TuNgay,DenNgay,DoanhThuCuoc,TienCODTrungChuyen,TongSanLuongDon,TyLeTienMat(%),TyLeVietQR(%)\n");
+        for (BaoCaoDoanhThu bc : baoCaoRepo.findAllByOrderByDenNgayDesc()) {
+            sb.append(String.format("%s,%s,%s,%s,%s,%s,%d,%.1f,%.1f\n",
+                    bc.getMaBaoCao(), bc.getMaBuuCuc(), bc.getTuNgay(), bc.getDenNgay(),
+                    bc.getDoanhThuCuoc(), bc.getTienCodTrungChuyen(), bc.getTongSanLuongDon(),
+                    bc.getTyLeTienMat(), bc.getTyLeVietQr()));
+        }
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"bao_cao_doanh_thu_fastpost.csv\"")
+                .contentType(new MediaType("text", "csv", StandardCharsets.UTF_8))
+                .body(sb.toString().getBytes(StandardCharsets.UTF_8));
     }
 }
