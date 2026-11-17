@@ -2,9 +2,11 @@ package com.fastpost.controller;
 
 import com.fastpost.entity.*;
 import com.fastpost.repository.*;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/danh-muc")
@@ -16,6 +18,7 @@ public class DanhMucController {
     private final NganHangRepository nganHangRepo;
     private final BuuCucRepository buuCucRepo;
     private final TuyenGiaoHangRepository tuyenRepo;
+    private final DonHangRepository donHangRepo;
 
     public DanhMucController(
             VungTuyenRepository vungTuyenRepo,
@@ -23,13 +26,15 @@ public class DanhMucController {
             LoaiHangHoaRepository loaiHangHoaRepo,
             NganHangRepository nganHangRepo,
             BuuCucRepository buuCucRepo,
-            TuyenGiaoHangRepository tuyenRepo) {
+            TuyenGiaoHangRepository tuyenRepo,
+            DonHangRepository donHangRepo) {
         this.vungTuyenRepo = vungTuyenRepo;
         this.goiDichVuRepo = goiDichVuRepo;
         this.loaiHangHoaRepo = loaiHangHoaRepo;
         this.nganHangRepo = nganHangRepo;
         this.buuCucRepo = buuCucRepo;
         this.tuyenRepo = tuyenRepo;
+        this.donHangRepo = donHangRepo;
     }
 
     @GetMapping("/vung-tuyen")
@@ -78,8 +83,16 @@ public class DanhMucController {
     }
 
     @PostMapping("/buu-cuc")
-    public BuuCuc saveBuuCuc(@RequestBody BuuCuc req) {
-        return buuCucRepo.save(req);
+    public ResponseEntity<?> saveBuuCuc(@RequestBody BuuCuc req) {
+        if ("TamNgung".equalsIgnoreCase(req.getTrangThaiHoatDong())) {
+            long tonKho = donHangRepo.countByMaBuuCucHienTaiAndTrangThaiIn(
+                    req.getMaBuuCuc(), List.of("DaNhapKho", "SanSangGiao", "TamGiuChoXuLy", "ChoLuanChuyenHub"));
+            if (tonKho > 0) {
+                return ResponseEntity.badRequest().body(Map.of(
+                        "message", "Không thể tạm ngưng bưu cục đang còn " + tonKho + " kiện hàng tồn kho"));
+            }
+        }
+        return ResponseEntity.ok(buuCucRepo.save(req));
     }
 
     @GetMapping("/tuyen-giao-hang")
