@@ -95,6 +95,7 @@ public class AuthController {
                     created.setMaNguoiDung("ND_KH_" + System.currentTimeMillis());
                     created.setSoDienThoai(phone);
                     created.setHoTen("Khách hàng " + phone);
+                    created.setEmail(phone + "@customer.fastpost.vn");
                     created.setTrangThai("Active");
                     return nguoiDungRepo.save(created);
                 });

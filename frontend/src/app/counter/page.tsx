@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { FilePlus2, QrCode, Printer, Vault, LogOut, CheckCircle2, AlertCircle } from "lucide-react";
 import { apiFetch, formatVnd, UserSession } from "@/lib/api";
 import { DISTRICT_NAMES, HCM_DISTRICTS } from "@/lib/hcmLocations";
+import { isValidPhone, sanitizePhoneInput } from "@/lib/validation";
 
 export default function CounterPage() {
   const router = useRouter();
@@ -177,6 +178,18 @@ export default function CounterPage() {
   async function handleCreateOrder(e: React.FormEvent) {
     e.preventDefault();
     setErrorMsg("");
+    if (!isValidPhone(senderPhone)) {
+      setErrorMsg("SĐT người gửi không hợp lệ (bắt buộc 10–11 chữ số, bắt đầu bằng 0).");
+      return;
+    }
+    if (!isValidPhone(receiverPhone)) {
+      setErrorMsg("SĐT người nhận không hợp lệ (bắt buộc 10–11 chữ số, bắt đầu bằng 0).");
+      return;
+    }
+    if (weight <= 0) {
+      setErrorMsg("Trọng lượng hàng hóa phải lớn hơn 0 kg.");
+      return;
+    }
     setSubmitting(true);
     try {
       const res = await apiFetch<{ maVanDon: string }>("/don-hang", {
@@ -356,9 +369,13 @@ export default function CounterPage() {
                         <label className="block text-xs font-medium text-slate-600 mb-1.5">Số điện thoại *</label>
                         <input
                           required
+                          type="tel"
+                          inputMode="numeric"
+                          pattern="0[0-9]{9,10}"
+                          maxLength={11}
                           value={senderPhone}
-                          onChange={(e) => setSenderPhone(e.target.value)}
-                          placeholder="Nhập SĐT người gửi..."
+                          onChange={(e) => setSenderPhone(sanitizePhoneInput(e.target.value))}
+                          placeholder="09xxxxxxxx"
                           className="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#FF5722]/30 focus:border-[#FF5722]"
                         />
                       </div>
@@ -383,9 +400,13 @@ export default function CounterPage() {
                         <label className="block text-xs font-medium text-slate-600 mb-1.5">Số điện thoại người nhận *</label>
                         <input
                           required
+                          type="tel"
+                          inputMode="numeric"
+                          pattern="0[0-9]{9,10}"
+                          maxLength={11}
                           value={receiverPhone}
-                          onChange={(e) => setReceiverPhone(e.target.value)}
-                          placeholder="Nhập SĐT người nhận..."
+                          onChange={(e) => setReceiverPhone(sanitizePhoneInput(e.target.value))}
+                          placeholder="09xxxxxxxx"
                           className="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#FF5722]/30 focus:border-[#FF5722]"
                         />
                       </div>

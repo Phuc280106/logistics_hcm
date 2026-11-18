@@ -204,6 +204,7 @@ public class DonHangController {
             created.setMaNguoiDung("ND_KH_" + System.currentTimeMillis());
             created.setSoDienThoai(sdtGui);
             created.setHoTen("Khách gửi " + sdtGui);
+            created.setEmail(sdtGui + "@shadow.fastpost.vn");
             created.setTrangThai("Active");
             return nguoiDungRepo.save(created);
         });
@@ -422,6 +423,53 @@ public class DonHangController {
             donHangRepo.save(dh);
             addHistory(maVanDon, dh.getMaBuuCucHienTai(), oldShipper, "ChoPhanCongLay",
                     "Shipper " + oldShipper + " từ chối lệnh lấy hàng (" + lyDo + ") — chờ điều phối lại");
+            return ResponseEntity.ok(dh);
+        }).orElse(ResponseEntity.notFound().build());
+    }
+
+    @PostMapping("/{maVanDon}/lay-that-bai")
+    @Transactional
+    public ResponseEntity<?> failPickup(@PathVariable String maVanDon, @RequestBody FailDeliveryRequest req) {
+        return donHangRepo.findById(maVanDon).map(dh -> {
+            String shipperId = req.maNhanVien() != null ? req.maNhanVien()
+                    : (dh.getMaShipper() != null ? dh.getMaShipper() : "NV_SHIP_01");
+            String lyDo = req.lyDoThatBai() != null && !req.lyDoThatBai().isBlank()
+                    ? req.lyDoThatBai()
+                    : "Khách không nghe máy";
+            boolean khachBaoHuy = lyDo.toLowerCase().contains("hủy");
+
+            if (khachBaoHuy) {
+                dh.setTrangThai("DaHuy");
+                dh.setMaShipper(null);
+                donHangRepo.save(dh);
+                addHistory(maVanDon, dh.getMaBuuCucHienTai(), shipperId, "DaHuy",
+                        "Lấy hàng thất bại (" + lyDo + ") — Đã hủy đơn theo yêu cầu khách");
+                return ResponseEntity.ok(dh);
+            }
+
+            dh.setMaShipper(null);
+            dh.setTrangThai("ChoPhanCongLay");
+            donHangRepo.save(dh);
+
+            LocalDateTime henCaSau = LocalDateTime.now().plusHours(4);
+            if (req.ngayHenGiaoLai() != null && !req.ngayHenGiaoLai().isBlank()) {
+                try {
+                    henCaSau = LocalDateTime.parse(req.ngayHenGiaoLai());
+                } catch (Exception ignored) {
+                }
+            }
+
+            LichHenGiaoLai lh = new LichHenGiaoLai();
+            lh.setMaLichHen("LH-LAY-" + System.currentTimeMillis());
+            lh.setMaVanDon(maVanDon);
+            lh.setLanGiaoThu(0);
+            lh.setLyDoThatBai(lyDo);
+            lh.setNgayHenGiaoLai(henCaSau);
+            lh.setGhiChu(req.ghiChu() != null && !req.ghiChu().isBlank() ? req.ghiChu() : "Hẹn lấy lại vào ca sau");
+            lichHenRepo.save(lh);
+
+            addHistory(maVanDon, dh.getMaBuuCucHienTai(), shipperId, "ChoPhanCongLay",
+                    "Lấy hàng thất bại (" + lyDo + ") — Đã lên lịch lấy lại vào ca sau (" + henCaSau + ")");
             return ResponseEntity.ok(dh);
         }).orElse(ResponseEntity.notFound().build());
     }

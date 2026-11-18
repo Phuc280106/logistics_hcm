@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Zap, User, Lock, Eye, EyeOff, Truck, Building2, ShieldCheck, Phone } from "lucide-react";
 import { apiFetch, UserSession } from "@/lib/api";
+import { isValidPhone, sanitizePhoneInput } from "@/lib/validation";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -53,6 +54,10 @@ export default function LoginPage() {
   async function handleOtpLogin(e: React.FormEvent) {
     e.preventDefault();
     setError("");
+    if (!isValidPhone(phone)) {
+      setError("Số điện thoại phải gồm 10–11 chữ số và bắt đầu bằng số 0.");
+      return;
+    }
     setLoading(true);
     try {
       const data = await apiFetch<UserSession>("/auth/otp-login", {
@@ -241,9 +246,13 @@ export default function LoginPage() {
                 <div className="relative">
                   <Phone className="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5" />
                   <input
-                    type="text"
+                    type="tel"
+                    inputMode="numeric"
+                    pattern="0[0-9]{9,10}"
+                    maxLength={11}
                     value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
+                    onChange={(e) => setPhone(sanitizePhoneInput(e.target.value))}
+                    placeholder="09xxxxxxxx"
                     className="w-full pl-10 pr-4 py-2.5 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#FF5722]/30 focus:border-[#FF5722]"
                     required
                   />

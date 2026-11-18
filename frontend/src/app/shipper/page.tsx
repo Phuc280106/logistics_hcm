@@ -46,9 +46,13 @@ export default function ShipperPage() {
   const [orders, setOrders] = useState<DonHangItem[]>([]);
   const [phieuXuatList, setPhieuXuatList] = useState<PhieuXuatItem[]>([]);
   const [tab, setTab] = useState<"deliver" | "pickup" | "done">("deliver");
+  const [navTab, setNavTab] = useState<"orders" | "route" | "wallet" | "profile">("orders");
+  const [settlementSlips, setSettlementSlips] = useState<
+    { maDoiSoat: string; tongPhaiNop: number; soTienThucNop?: number; trangThai: string; ngayDoiSoat?: string }[]
+  >([]);
   const [online, setOnline] = useState(true);
   const [selected, setSelected] = useState<DonHangItem | null>(null);
-  const [modalMode, setModalMode] = useState<"detail" | "pod" | "fail" | null>(null);
+  const [modalMode, setModalMode] = useState<"detail" | "pod" | "fail" | "fail_pickup" | null>(null);
   const [receiverName, setReceiverName] = useState("");
   const [podPhotoName, setPodPhotoName] = useState("pod-hien-truong.jpg");
   const [gpsCoords, setGpsCoords] = useState("10.7745,106.7035");
@@ -87,6 +91,12 @@ export default function ShipperPage() {
         setCodWallet(Number(vi.tongNoLuyKe || 0));
         setWalletLocked(Boolean(vi.daKhoaNhanDon));
       })
+      .catch(() => {});
+
+    apiFetch<{ maDoiSoat: string; tongPhaiNop: number; soTienThucNop?: number; trangThai: string; ngayDoiSoat?: string }[]>(
+      `/doi-soat/shipper?maShipper=${shipperId}`
+    )
+      .then((slips) => setSettlementSlips(slips))
       .catch(() => {});
 
     if (typeof navigator !== "undefined" && navigator.geolocation) {
@@ -231,6 +241,27 @@ export default function ShipperPage() {
     }
   }
 
+  async function handleReportPickupFail() {
+    if (!selected) return;
+    setErrorMsg("");
+    try {
+      await apiFetch(`/don-hang/${selected.maVanDon}/lay-that-bai`, {
+        method: "POST",
+        body: JSON.stringify({
+          maNhanVien: user?.maNhanVien || "NV_SHIP_01",
+          lyDoThatBai: failReason,
+          ngayHenGiaoLai: rescheduleDate || null,
+          ghiChu: failNote || "Lên lịch lấy lại vào ca sau",
+        }),
+      });
+      setOrders((prev) => prev.filter((o) => o.maVanDon !== selected.maVanDon));
+      setModalMode(null);
+      setSelected(null);
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Lỗi báo lấy hàng thất bại");
+    }
+  }
+
   async function handleHandoverWarehouse(maVanDon: string, targetKho: string) {
     setErrorMsg("");
     try {
@@ -322,7 +353,12 @@ export default function ShipperPage() {
             </div>
           </div>
           <div className="flex items-center justify-between">
-            <span className="text-xs text-slate-500 font-medium">Danh sách ca phát</span>
+            <span className="text-xs text-slate-500 font-medium">
+              {navTab === "orders" && "Danh sách ca phát"}
+              {navTab === "route" && "Lộ trình di chuyển"}
+              {navTab === "wallet" && "Ví công nợ & Đối soát COD"}
+              {navTab === "profile" && "Hồ sơ tài xế"}
+            </span>
             <button
               onClick={() => !walletLocked && setOnline(!online)}
               className={`flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold border ${
@@ -346,7 +382,9 @@ export default function ShipperPage() {
             </div>
           )}
 
-          {/* Pending Dispatch Handover Banner */}
+          {navTab === "orders" && (
+            <>
+              {/* Pending Dispatch Handover Banner */}
           {pendingPhieuXuat.map((px) => (
             <div key={px.maPhieuXuat} className="bg-orange-50 border border-[#FF5722]/40 rounded-2xl p-3.5 flex items-center justify-between">
               <div className="text-xs">
@@ -500,9 +538,21 @@ export default function ShipperPage() {
                         <div className="flex gap-1.5">
                           <button
                             onClick={() => handleRejectPickup(o.maVanDon)}
-                            className="px-2.5 py-2 border border-red-200 bg-red-50 text-red-700 text-[11px] font-semibold rounded-xl"
+                            className="px-2 py-2 border border-red-200 bg-red-50 text-red-700 text-[11px] font-semibold rounded-xl"
                           >
                             Từ chối
+                          </button>
+                          <button
+                            onClick={() => {
+                              setSelected(o);
+                              setFailReason("Khách không nghe máy");
+                              setRescheduleDate("");
+                              setFailNote("");
+                              setModalMode("fail_pickup");
+                            }}
+                            className="px-2 py-2 border border-amber-200 bg-amber-50 text-amber-800 text-[11px] font-semibold rounded-xl"
+                          >
+                            Lấy thất bại
                           </button>
                           <button
                             onClick={() => handleConfirmPickup(o.maVanDon)}
@@ -532,22 +582,189 @@ export default function ShipperPage() {
               ))
             )}
           </div>
+            </>
+          )}
+
+          {navTab === "route" && (
+            <div className="space-y-3">
+              <div className="bg-white rounded-2xl p-4 border border-slate-200 flex items-center justify-between">
+                <div>
+                  <div className="text-xs text-slate-500">Tọa độ GPS hiện tại</div>
+                  <div className="font-mono text-sm font-bold text-[#0F172A]">{gpsCoords}</div>
+                </div>
+                <span className="px-2.5 py-1 rounded-full bg-orange-50 text-[#FF5722] text-xs font-semibold">
+                  {pickupOrders.length + activeDeliver.length} điểm dừng
+                </span>
+              </div>
+
+              {pickupOrders.length + activeDeliver.length === 0 ? (
+                <div className="bg-white rounded-2xl p-8 text-center text-slate-400 text-sm border border-slate-200">
+                  Chưa có điểm dừng nào trong ca hiện tại.
+                </div>
+              ) : (
+                <div className="space-y-2.5">
+                  {[...pickupOrders.map((o) => ({ ...o, _stopType: "Lấy hàng" as const })), ...activeDeliver.map((o) => ({ ...o, _stopType: "Giao hàng" as const }))].map((o, idx) => {
+                    const fullAddr = `${o.diaChiGiaoChiTiet}, ${o.phuongXaGiao}, ${o.quanHuyenGiao}, TP.HCM`;
+                    return (
+                      <div key={o.maVanDon} className="bg-white rounded-2xl p-3.5 border border-slate-200 flex items-start gap-3">
+                        <div className="w-7 h-7 rounded-full bg-[#0F172A] text-white text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">
+                          {idx + 1}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                              o._stopType === "Lấy hàng" ? "bg-blue-50 text-blue-700" : "bg-orange-50 text-[#FF5722]"
+                            }`}>
+                              {o._stopType}
+                            </span>
+                            <span className="font-mono text-xs font-bold text-[#0F172A]">#{o.maVanDon}</span>
+                          </div>
+                          <div className="text-xs font-semibold text-slate-800 truncate">{o.nguoiNhanTen} · {o.nguoiNhanSdt}</div>
+                          <div className="text-xs text-slate-500 mt-0.5">{fullAddr}</div>
+                          <div className="flex items-center gap-2 mt-2">
+                            <a
+                              href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(fullAddr)}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-semibold inline-flex items-center gap-1"
+                            >
+                              <Navigation className="w-3 h-3" /> Chỉ đường
+                            </a>
+                            <button
+                              onClick={() => { setSelected(o); setModalMode("detail"); }}
+                              className="px-2.5 py-1 rounded-lg bg-orange-50 text-[#FF5722] text-[11px] font-semibold"
+                            >
+                              Chi tiết
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {navTab === "wallet" && (
+            <div className="space-y-4">
+              <div className="bg-gradient-to-br from-[#0F172A] to-[#1E293B] text-white rounded-2xl p-4 shadow-md space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-slate-300">Số dư công nợ COD đang giữ</span>
+                  <span className={`px-2 py-0.5 rounded-full text-[11px] font-semibold ${
+                    walletLocked ? "bg-red-500/20 text-red-300" : "bg-emerald-500/20 text-emerald-300"
+                  }`}>
+                    {walletLocked ? "Đang khóa nhận đơn" : "Hoạt động bình thường"}
+                  </span>
+                </div>
+                <div className="text-3xl font-bold">{formatVnd(codWallet)}</div>
+                <div className="w-full h-1.5 bg-slate-700 rounded-full overflow-hidden">
+                  <div className="h-full bg-[#FF5722] rounded-full" style={{ width: `${pct}%` }} />
+                </div>
+                <div className="flex justify-between text-[11px] text-slate-400">
+                  <span>Hạn mức: 3.000.000đ / 24h</span>
+                  <span>{pct}%</span>
+                </div>
+                {codWallet > 0 && (
+                  <button
+                    onClick={handleRequestSettlement}
+                    className="w-full py-2.5 rounded-xl bg-[#FF5722] hover:bg-[#E64A19] text-white text-xs font-semibold transition"
+                  >
+                    Tạo phiếu nộp COD về quầy ({formatVnd(codWallet)})
+                  </button>
+                )}
+                {settleMsg && (
+                  <div className="text-[11px] text-emerald-300 bg-emerald-500/15 px-2.5 py-1.5 rounded-lg">
+                    {settleMsg}
+                  </div>
+                )}
+              </div>
+
+              <div className="bg-white rounded-2xl p-4 border border-slate-200 space-y-2.5">
+                <h3 className="text-sm font-bold text-[#0F172A]">Lịch sử phiếu đối soát COD</h3>
+                {settlementSlips.length === 0 ? (
+                  <div className="text-xs text-slate-400 py-3 text-center">Chưa có phiếu đối soát nào.</div>
+                ) : (
+                  settlementSlips.map((s) => (
+                    <div key={s.maDoiSoat} className="flex items-center justify-between py-2 border-b border-slate-100 last:border-0 text-xs">
+                      <div>
+                        <div className="font-mono font-bold text-[#0F172A]">{s.maDoiSoat}</div>
+                        <div className="text-slate-500">Phải nộp: {formatVnd(s.tongPhaiNop)}</div>
+                      </div>
+                      <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 font-semibold text-[11px]">
+                        {s.trangThai}
+                      </span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
+
+          {navTab === "profile" && (
+            <div className="space-y-4">
+              <div className="bg-white rounded-2xl p-4 border border-slate-200 flex items-center gap-3">
+                <div className="w-12 h-12 rounded-full bg-orange-100 text-[#FF5722] font-bold text-lg flex items-center justify-center">
+                  {(user?.hoTen || "S").charAt(0)}
+                </div>
+                <div>
+                  <div className="font-bold text-[#0F172A]">{user?.hoTen || "Shipper"}</div>
+                  <div className="text-xs text-slate-500">Mã NV: {user?.maNhanVien || "NV_SHIP_01"} · {user?.maBuuCuc || "BC_BENNGHE"}</div>
+                  <div className="text-xs text-slate-500">SĐT: {user?.soDienThoai || "0909000002"}</div>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-2xl p-4 border border-slate-200 grid grid-cols-3 gap-2 text-center">
+                <div className="p-2 rounded-xl bg-slate-50">
+                  <div className="text-lg font-bold text-[#0F172A]">{activeDeliver.length}</div>
+                  <div className="text-[11px] text-slate-500">Đang giao</div>
+                </div>
+                <div className="p-2 rounded-xl bg-slate-50">
+                  <div className="text-lg font-bold text-blue-600">{pickupOrders.length}</div>
+                  <div className="text-[11px] text-slate-500">Cần lấy</div>
+                </div>
+                <div className="p-2 rounded-xl bg-slate-50">
+                  <div className="text-lg font-bold text-emerald-600">{doneOrders.length}</div>
+                  <div className="text-[11px] text-slate-500">Đã xử lý</div>
+                </div>
+              </div>
+
+              <button
+                onClick={() => { localStorage.removeItem("fastpost_user"); router.push("/"); }}
+                className="w-full py-2.5 rounded-xl border border-red-200 bg-red-50 text-red-700 font-semibold text-sm flex items-center justify-center gap-2"
+              >
+                <LogOut className="w-4 h-4" /> Đăng xuất tài khoản
+              </button>
+            </div>
+          )}
         </main>
 
         {/* Bottom Nav */}
         <nav className="fixed bottom-0 w-full max-w-[430px] bg-white border-t border-slate-200 grid grid-cols-4 py-2 text-[11px] font-medium text-slate-500">
-          <div className="flex flex-col items-center text-[#FF5722] font-semibold">
+          <button
+            onClick={() => setNavTab("orders")}
+            className={`flex flex-col items-center ${navTab === "orders" ? "text-[#FF5722] font-semibold" : "text-slate-500"}`}
+          >
             <Package className="w-5 h-5 mb-0.5" /> Đơn hàng
-          </div>
-          <div className="flex flex-col items-center">
+          </button>
+          <button
+            onClick={() => setNavTab("route")}
+            className={`flex flex-col items-center ${navTab === "route" ? "text-[#FF5722] font-semibold" : "text-slate-500"}`}
+          >
             <Navigation className="w-5 h-5 mb-0.5" /> Lộ trình
-          </div>
-          <div className="flex flex-col items-center">
+          </button>
+          <button
+            onClick={() => setNavTab("wallet")}
+            className={`flex flex-col items-center ${navTab === "wallet" ? "text-[#FF5722] font-semibold" : "text-slate-500"}`}
+          >
             <Wallet className="w-5 h-5 mb-0.5" /> Ví tiền
-          </div>
-          <div className="flex flex-col items-center">
+          </button>
+          <button
+            onClick={() => setNavTab("profile")}
+            className={`flex flex-col items-center ${navTab === "profile" ? "text-[#FF5722] font-semibold" : "text-slate-500"}`}
+          >
             <User className="w-5 h-5 mb-0.5" /> Cá nhân
-          </div>
+          </button>
         </nav>
 
         {/* Modal for Order Detail / POD / Fail + Reschedule */}
@@ -702,6 +919,50 @@ export default function ShipperPage() {
                     className="w-full py-2.5 bg-red-600 text-white font-semibold rounded-xl text-sm"
                   >
                     Xác nhận báo thất bại
+                  </button>
+                </>
+              )}
+
+              {modalMode === "fail_pickup" && (
+                <>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">Lý do lấy hàng thất bại</label>
+                    <select
+                      value={failReason}
+                      onChange={(e) => setFailReason(e.target.value)}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm"
+                    >
+                      <option value="Khách không nghe máy">Khách không nghe máy (Lấy lại ca sau)</option>
+                      <option value="Khách hẹn lấy lại ca sau">Khách hẹn lấy lại ca sau</option>
+                      <option value="Khách báo hủy đơn">Khách báo hủy đơn (→ DaHuy)</option>
+                    </select>
+                  </div>
+                  {!failReason.toLowerCase().includes("hủy") && (
+                    <div>
+                      <label className="block text-xs font-medium text-slate-600 mb-1">Ngày giờ hẹn lấy lại (ca sau)</label>
+                      <input
+                        type="datetime-local"
+                        value={rescheduleDate}
+                        onChange={(e) => setRescheduleDate(e.target.value)}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm"
+                      />
+                    </div>
+                  )}
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">Ghi chú</label>
+                    <input
+                      type="text"
+                      value={failNote}
+                      onChange={(e) => setFailNote(e.target.value)}
+                      placeholder="Ghi chú thực tế tại điểm lấy..."
+                      className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm"
+                    />
+                  </div>
+                  <button
+                    onClick={handleReportPickupFail}
+                    className="w-full py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-semibold rounded-xl text-sm"
+                  >
+                    Xác nhận lấy hàng thất bại
                   </button>
                 </>
               )}

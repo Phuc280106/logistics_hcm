@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { API_BASE, apiFetch, formatVnd, UserSession } from "@/lib/api";
 import { DISTRICT_NAMES, HCM_DISTRICTS } from "@/lib/hcmLocations";
+import { isValidPhone, sanitizePhoneInput } from "@/lib/validation";
 
 interface ManifestItem {
   maManifest: string;
@@ -711,7 +712,7 @@ export default function AdminPage() {
                     </h2>
                     <div>
                       <label className="block text-xs text-slate-500 mb-1">Mã vận đơn *</label>
-                      <input required value={incidentCode} onChange={(e) => setIncidentCode(e.target.value)} placeholder="Nhập mã vận đơn..." className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm" />
+                      <input required value={incidentCode} onChange={(e) => setIncidentCode(e.target.value)} placeholder="VD: FP-98233 (không nhập mã MF-...)" className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm" />
                     </div>
                     <div>
                       <label className="block text-xs text-slate-500 mb-1">Tình trạng hàng hóa</label>
@@ -1423,6 +1424,10 @@ export default function AdminPage() {
                   onSubmit={async (e) => {
                     e.preventDefault();
                     setErrorMsg("");
+                    if (!isValidPhone(stPhone)) {
+                      setErrorMsg("SĐT nhân sự không hợp lệ (bắt buộc 10–11 chữ số, bắt đầu bằng 0).");
+                      return;
+                    }
                     try {
                       const res = await apiFetch<{ maNhanVien: string; matKhauTam: string }>("/nhan-su", {
                         method: "POST",
@@ -1451,7 +1456,17 @@ export default function AdminPage() {
                   <h2 className="font-bold text-base">Thêm tài khoản nhân sự</h2>
                   <input value={stCode} onChange={(e) => setStCode(e.target.value)} placeholder="Mã NV (VD: NV_SHIP_02, để trống tự sinh)" className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs" />
                   <input required value={stName} onChange={(e) => setStName(e.target.value)} placeholder="Họ và tên *" className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs" />
-                  <input required value={stPhone} onChange={(e) => setStPhone(e.target.value)} placeholder="Số điện thoại *" className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs" />
+                  <input
+                    required
+                    type="tel"
+                    inputMode="numeric"
+                    pattern="0[0-9]{9,10}"
+                    maxLength={11}
+                    value={stPhone}
+                    onChange={(e) => setStPhone(sanitizePhoneInput(e.target.value))}
+                    placeholder="Số điện thoại * (09xxxxxxxx)"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs"
+                  />
                   <input type="email" value={stEmail} onChange={(e) => setStEmail(e.target.value)} placeholder="Email công vụ" className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs" />
                   <div className="grid grid-cols-2 gap-2">
                     <select value={stRole} onChange={(e) => setStRole(e.target.value)} className="px-2.5 py-2 border border-slate-300 rounded-xl text-xs bg-white">

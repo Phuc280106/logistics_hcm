@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { apiFetch, formatVnd, UserSession } from "@/lib/api";
 import { DISTRICT_NAMES, HCM_DISTRICTS } from "@/lib/hcmLocations";
+import { isValidPhone, sanitizePhoneInput } from "@/lib/validation";
 
 interface SoDiaChiItem {
   maDiaChi: string;
@@ -187,6 +188,14 @@ export default function CustomerPage() {
     e.preventDefault();
     setErrorMsg("");
     setCreatedOrder(null);
+    if (!isValidPhone(receiverPhone)) {
+      setErrorMsg("SĐT người nhận không hợp lệ (bắt buộc 10–11 chữ số, bắt đầu bằng 0).");
+      return;
+    }
+    if (weight <= 0) {
+      setErrorMsg("Trọng lượng hàng hóa phải lớn hơn 0 kg.");
+      return;
+    }
     setLoading(true);
     try {
       const res = await apiFetch<{ maVanDon: string }>("/don-hang", {
@@ -269,6 +278,10 @@ export default function CustomerPage() {
     e.preventDefault();
     if (!user?.maNguoiDung) return;
     setErrorMsg("");
+    if (!isValidPhone(newAddrPhone)) {
+      setErrorMsg("Số điện thoại địa chỉ không hợp lệ (bắt buộc 10–11 chữ số, bắt đầu bằng 0).");
+      return;
+    }
     try {
       await apiFetch(`/khach-hang/${user.maNguoiDung}/dia-chi`, {
         method: "POST",
@@ -500,7 +513,17 @@ export default function CustomerPage() {
               </div>
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1">SĐT người nhận *</label>
-                <input value={receiverPhone} onChange={(e) => setReceiverPhone(e.target.value)} placeholder="Nhập số điện thoại..." className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm" required />
+                <input
+                  type="tel"
+                  inputMode="numeric"
+                  pattern="0[0-9]{9,10}"
+                  maxLength={11}
+                  value={receiverPhone}
+                  onChange={(e) => setReceiverPhone(sanitizePhoneInput(e.target.value))}
+                  placeholder="09xxxxxxxx"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm"
+                  required
+                />
               </div>
               <div className="grid grid-cols-2 gap-2.5">
                 <div>
@@ -733,7 +756,17 @@ export default function CustomerPage() {
                   <div className="text-xs font-semibold text-slate-700">Thêm địa chỉ mới</div>
                   <div className="grid grid-cols-2 gap-2">
                     <input value={newAddrName} onChange={(e) => setNewAddrName(e.target.value)} placeholder="Tên người nhận" className="px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs" required />
-                    <input value={newAddrPhone} onChange={(e) => setNewAddrPhone(e.target.value)} placeholder="Số điện thoại" className="px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs" required />
+                    <input
+                      type="tel"
+                      inputMode="numeric"
+                      pattern="0[0-9]{9,10}"
+                      maxLength={11}
+                      value={newAddrPhone}
+                      onChange={(e) => setNewAddrPhone(sanitizePhoneInput(e.target.value))}
+                      placeholder="Số điện thoại (09xxxxxxxx)"
+                      className="px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs"
+                      required
+                    />
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <select

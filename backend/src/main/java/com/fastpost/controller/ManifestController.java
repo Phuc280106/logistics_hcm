@@ -190,23 +190,32 @@ public class ManifestController {
 
     @PostMapping("/bien-ban-bat-thuong")
     @Transactional
-    public BienBanBatThuong createIncident(@RequestBody IncidentRequest req) {
+    public ResponseEntity<?> createIncident(@RequestBody IncidentRequest req) {
+        if (req.maVanDon() == null || req.maVanDon().isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("message", "Vui lòng nhập mã vận đơn."));
+        }
+        String maVanDon = req.maVanDon().trim();
+        var dhOpt = donHangRepo.findById(maVanDon);
+        if (dhOpt.isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "message", "Không tìm thấy mã vận đơn \"" + maVanDon + "\". Vui lòng nhập đúng mã vận đơn (VD: FP-98233), không nhập mã Manifest (MF-...)."));
+        }
+
+        DonHang dh = dhOpt.get();
+        dh.setTrangThai("TamGiuChoXuLy");
+        donHangRepo.save(dh);
+
         BienBanBatThuong bb = new BienBanBatThuong();
         bb.setMaBienBan("BB-" + System.currentTimeMillis());
-        bb.setMaVanDon(req.maVanDon());
+        bb.setMaVanDon(maVanDon);
         bb.setMaNhanVienKhoLap(req.maNhanVienKho() != null ? req.maNhanVienKho() : "NV_ADMIN_01");
-        bb.setLoaiBatThuong(req.loaiBatThuong() != null ? req.loaiBatThuong() : "RachVo");
+        bb.setLoaiBatThuong(req.loaiBatThuong() != null ? req.loaiBatThuong() : "RachBaoBi");
         bb.setCanNangThucTe(req.canNangThucTe());
         bb.setHinhAnhBangChung("incident-demo.jpg");
         bb.setMoTa(req.moTa());
         bb.setTrangThaiDuyet("ChoXuLy");
 
-        donHangRepo.findById(req.maVanDon()).ifPresent(dh -> {
-            dh.setTrangThai("TamGiuChoXuLy");
-            donHangRepo.save(dh);
-        });
-
-        return bienBanRepo.save(bb);
+        return ResponseEntity.ok(bienBanRepo.save(bb));
     }
 
     @PostMapping("/bien-ban-bat-thuong/{maBienBan}/duyet")
