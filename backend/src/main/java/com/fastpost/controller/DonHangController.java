@@ -301,6 +301,10 @@ public class DonHangController {
     @Transactional
     public ResponseEntity<?> confirmDelivery(@PathVariable String maVanDon, @RequestBody PodRequest req) {
         return donHangRepo.findById(maVanDon).map(dh -> {
+            if ("DaGiaoThanhCong".equals(dh.getTrangThai()) || "DaQuyetToanCOD".equals(dh.getTrangThai())) {
+                return ResponseEntity.badRequest().body(Map.of(
+                        "message", "Đơn hàng " + maVanDon + " đã giao thành công trước đó."));
+            }
             dh.setTrangThai("DaGiaoThanhCong");
             donHangRepo.save(dh);
 

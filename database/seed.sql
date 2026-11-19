@@ -71,7 +71,7 @@ INSERT INTO chi_tiet_tieu_tuyen (ma_tieu_tuyen, quan_huyen, phuong_xa) VALUES
 ('TT_BENGHE', N'Quận 1', N'P. Đa Kao');
 
 INSERT INTO vi_cong_no_shipper (ma_vi, ma_shipper, tong_no_luy_ke, thoi_diem_phat_sinh_no, da_khoa_nhan_don) VALUES
-('VI_SHIP_01', 'NV_SHIP_01', 1250000, GETDATE(), 0);
+('VI_SHIP_01', 'NV_SHIP_01', 0, NULL, 0);
 
 -- 5. Bảng giá cước
 INSERT INTO bang_gia_cuoc (ma_bang_gia, ten_bang_gia, ngay_hieu_luc, dang_kich_hoat, he_so_quy_doi_kich_thuoc) VALUES
@@ -81,42 +81,3 @@ INSERT INTO chi_tiet_bang_gia (ma_bang_gia, ma_vung_tuyen, ma_goi_dich_vu, cuoc_
 ('BG_2026', 'VT_NOITINH', 'GDV_TIEUCHUAN', 20000, 1.0, 10000, 3000, 0.01),
 ('BG_2026', 'VT_NOITINH', 'GDV_HOATOC', 35000, 1.0, 15000, 5000, 0.01),
 ('BG_2026', 'VT_NGOAITINH', 'GDV_TIEUCHUAN', 28000, 1.0, 12000, 4000, 0.012);
-
--- 6. Đơn hàng mẫu
-INSERT INTO don_hang (
-    ma_van_don, ma_khach_hang, ma_buu_cuc_hien_tai, ma_shipper, ma_bang_gia, ma_vung_tuyen, ma_goi_dich_vu, ma_loai_hang,
-    nguoi_gui_sdt, nguoi_nhan_ten, nguoi_nhan_sdt, dia_chi_giao_chi_tiet, phuong_xa_giao, quan_huyen_giao,
-    trong_luong_thuc, chieu_dai, chieu_rong, chieu_cao, trong_luong_tinh_cuoc, la_hang_de_vo, la_hang_cong_kenh,
-    tien_cod, nguoi_tra_cuoc, hinh_thuc_thanh_toan, cuoc_san, cuoc_vuot_can, phu_phi, phi_cod, tong_cuoc, trang_thai, so_lan_giao_that_bai
-) VALUES
-('FP-98231', 'ND_KH_01', 'BC_BENNGHE', 'NV_SHIP_01', 'BG_2026', 'VT_NOITINH', 'GDV_HOATOC', 'LHH_THUONG',
- '0909123456', N'Trần Thị Mai', '0912345678', N'45 Lê Duẩn', N'P. Bến Nghé', N'Quận 1',
- 1.2, 20, 15, 10, 1.2, 0, 0, 450000, 'NguoiGui', 'VietQR', 35000, 3000, 0, 4500, 42500, 'DangGiaoHang', 0),
-('FP-98232', 'ND_KH_01', 'BC_BENNGHE', 'NV_SHIP_01', 'BG_2026', 'VT_NOITINH', 'GDV_TIEUCHUAN', 'LHH_THUONG',
- '0909123456', N'Lê Hoàng Phúc', '0903456789', N'78 Hai Bà Trưng', N'P. Đa Kao', N'Quận 1',
- 0.8, 15, 10, 10, 0.8, 0, 0, 0, 'NguoiGui', 'VietQR', 20000, 0, 0, 0, 20000, 'SanSangGiao', 0),
-('FP-98233', 'ND_KH_01', 'KHO_Q1', 'NV_SHIP_01', 'BG_2026', 'VT_NOITINH', 'GDV_TIEUCHUAN', 'LHH_DEVO',
- '0909123456', N'Nguyễn Văn Hùng', '0908111222', N'28 Nguyễn Huệ', N'P. Bến Nghé', N'Quận 1',
- 1.5, 20, 15, 10, 1.5, 1, 0, 500000, 'NguoiGui', 'TienMat', 20000, 5000, 3000, 5000, 33000, 'DaNhapKho', 0),
-('FP-98236', 'ND_KH_01', 'KHO_Q1', NULL, 'BG_2026', 'VT_NOITINH', 'GDV_TIEUCHUAN', 'LHH_DEVO',
- '0909123456', N'Phạm Thị Lan', '0907333444', N'102 Pasteur', N'P. Bến Nghé', N'Quận 1',
- 2.0, 25, 20, 15, 2.0, 1, 0, 320000, 'NguoiNhan', 'TienMat', 20000, 10000, 3000, 3200, 36200, 'TamGiuChoXuLy', 0);
-
-INSERT INTO lich_su_hanh_trinh (ma_hanh_trinh, ma_van_don, ma_buu_cuc, ma_nhan_vien_thuc_hien, trang_thai_ghi_nhan, mo_ta_chi_tiet) VALUES
-('HT_01', 'FP-98231', 'BC_BENNGHE', 'NV_QUAY_01', 'DaNhapKho', N'Tiếp nhận đơn hàng tại Bưu cục Bến Nghé'),
-('HT_02', 'FP-98231', 'BC_BENNGHE', 'NV_SHIP_01', 'DangGiaoHang', N'Shipper Phương Duy đã nhận đơn và đang đi giao');
-
--- 7. Manifest mẫu
-INSERT INTO manifest (ma_manifest, ma_buu_cuc_di, ma_buu_cuc_den, ma_nhan_vien_lap, tong_so_kien, trang_thai) VALUES
-('MF-Q1-151126', 'KHO_Q1', 'BC_BENNGHE', 'NV_ADMIN_01', 2, 'DangKhoiTao');
-
-INSERT INTO chi_tiet_manifest (ma_manifest, ma_van_don, da_quet_nhap) VALUES
-('MF-Q1-151126', 'FP-98231', 1),
-('MF-Q1-151126', 'FP-98233', 0);
-
--- 8. Phiếu đối soát & KPI mẫu
-INSERT INTO phieu_doi_soat_shipper (ma_doi_soat, ma_shipper, ma_nhan_vien_quay, tong_don_thanh_cong, tong_tien_cod, tong_cuoc_mat, tong_phai_nop, so_tien_thuc_nop, so_tien_thieu, trang_thai) VALUES
-('PDS-20261115-01', 'NV_SHIP_01', 'NV_QUAY_01', 5, 1250000, 0, 1250000, 1250000, 0, 'DaKhoaSo');
-
-INSERT INTO danh_gia_kpi (ma_kpi, ma_shipper, ky_danh_gia, ty_le_giao_thanh_cong, ty_le_dung_hen_sla, san_luong_don_binh_quan, diem_tong_ket, xep_loai) VALUES
-('KPI_202611_01', 'NV_SHIP_01', '2026-11', 97.5, 95.0, 28, 96.2, 'A');

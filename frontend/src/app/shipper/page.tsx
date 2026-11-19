@@ -149,9 +149,9 @@ export default function ShipperPage() {
       setPhieuXuatList((prev) =>
         prev.map((p) => (p.maPhieuXuat === maPhieuXuat ? { ...p, shipperDaXacNhan: true } : p))
       );
-      setOrders((prev) =>
-        prev.map((o) => (o.trangThai === "SanSangGiao" ? { ...o, trangThai: "DangGiaoHang" } : o))
-      );
+      const shipperId = user?.maNhanVien || "NV_SHIP_01";
+      const freshOrders = await apiFetch<DonHangItem[]>(`/don-hang?shipper=${shipperId}`);
+      setOrders(freshOrders);
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : "Lỗi xác nhận phiếu xuất kho");
     }
@@ -507,17 +507,23 @@ export default function ShipperPage() {
                       <div className="font-bold text-base text-[#0F172A]">{formatVnd(o.tienCod)}</div>
                     </div>
                     {tab === "deliver" ? (
-                      <button
-                        onClick={() => {
-                          setSelected(o);
-                          setModalMode("detail");
-                          setReceiverName(o.nguoiNhanTen);
-                          setHasSigned(false);
-                        }}
-                        className="px-4 py-2 bg-[#FF5722] hover:bg-[#E64A19] text-white text-xs font-semibold rounded-xl transition"
-                      >
-                        Bắt đầu giao →
-                      </button>
+                      o.trangThai === "SanSangGiao" && pendingPhieuXuat.length > 0 ? (
+                        <span className="px-3 py-2 bg-amber-50 border border-amber-200 text-amber-800 text-[11px] font-semibold rounded-xl">
+                          Xác nhận PXK ở trên trước
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() => {
+                            setSelected(o);
+                            setModalMode("detail");
+                            setReceiverName(o.nguoiNhanTen);
+                            setHasSigned(false);
+                          }}
+                          className="px-4 py-2 bg-[#FF5722] hover:bg-[#E64A19] text-white text-xs font-semibold rounded-xl transition"
+                        >
+                          Bắt đầu giao →
+                        </button>
+                      )
                     ) : tab === "pickup" ? (
                       o.trangThai === "DaLayHang" ? (
                         <div className="flex gap-1.5">

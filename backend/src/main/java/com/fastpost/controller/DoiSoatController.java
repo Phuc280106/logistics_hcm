@@ -49,7 +49,7 @@ public class DoiSoatController {
     }
 
     public record CreateDoiSoatRequest(String maShipper, String maNhanVienQuay, Integer tongDonThanhCong, BigDecimal tongTienCod, BigDecimal tongCuocMat) {}
-    public record KhopLenhRequest(BigDecimal soTienThucNop) {}
+    public record KhopLenhRequest(BigDecimal soTienThucNop, String maNhanVienQuay) {}
     public record NopBuNoRequest(BigDecimal soTienBu) {}
     public record ChotQuyRequest(String maBuuCuc, String maNhanVienQuayLap, BigDecimal tienCuocQuay, BigDecimal tienShipperNop, BigDecimal tienThucKiemKe, String lyDoChenhLech) {}
 
@@ -59,6 +59,27 @@ public class DoiSoatController {
             return phieuRepo.findByMaShipperOrderByNgayDoiSoatDesc(maShipper);
         }
         return phieuRepo.findAllByOrderByNgayDoiSoatDesc();
+    }
+
+    @GetMapping("/vi-cong-no")
+    @Transactional
+    public List<ViCongNoShipper> listViCongNo() {
+        List<ViCongNoShipper> list = viRepo.findAll();
+        for (ViCongNoShipper vi : list) {
+            boolean over24h = vi.getTongNoLuyKe().compareTo(BigDecimal.ZERO) > 0
+                    && vi.getThoiDiemPhatSinhNo() != null
+                    && vi.getThoiDiemPhatSinhNo().isBefore(LocalDateTime.now().minusHours(24));
+            boolean overLimit = vi.getTongNoLuyKe().compareTo(DEBT_LIMIT) >= 0;
+            if ((over24h || overLimit) && !Boolean.TRUE.equals(vi.getDaKhoaNhanDon())) {
+                vi.setDaKhoaNhanDon(true);
+                viRepo.save(vi);
+                shipperRepo.findById(vi.getMaShipper()).ifPresent(s -> {
+                    s.setTrangThaiNhanDon("KhoaTamThoi");
+                    shipperRepo.save(s);
+                });
+            }
+        }
+        return list;
     }
 
     @GetMapping("/vi-cong-no/{maShipper}")
@@ -153,6 +174,9 @@ public class DoiSoatController {
         return phieuRepo.findById(maDoiSoat).map(p -> {
             BigDecimal thucNop = req.soTienThucNop() != null ? req.soTienThucNop() : BigDecimal.ZERO;
             BigDecimal phaiNop = p.getTongPhaiNop() != null ? p.getTongPhaiNop() : BigDecimal.ZERO;
+            if (req.maNhanVienQuay() != null && !req.maNhanVienQuay().isBlank()) {
+                p.setMaNhanVienQuay(req.maNhanVienQuay());
+            }
             p.setSoTienThucNop(thucNop);
 
             // State Diagram PhieuDoiSoatShipper pe-4: ThucNop > PhaiNop -> giữ DangKiemDem để đếm lại

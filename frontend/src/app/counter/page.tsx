@@ -2,17 +2,37 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { FilePlus2, QrCode, Printer, Vault, LogOut, CheckCircle2, AlertCircle } from "lucide-react";
+import { FilePlus2, QrCode, Printer, Vault, LogOut, CheckCircle2, AlertCircle, Wallet, Unlock, RefreshCw } from "lucide-react";
 import { apiFetch, formatVnd, UserSession } from "@/lib/api";
 import { DISTRICT_NAMES, HCM_DISTRICTS } from "@/lib/hcmLocations";
 import { isValidPhone, sanitizePhoneInput } from "@/lib/validation";
 
+interface ShipperWalletItem {
+  maVi: string;
+  maShipper: string;
+  tongNoLuyKe: number;
+  daKhoaNhanDon?: boolean;
+}
+
+interface PhieuDoiSoatItem {
+  maDoiSoat: string;
+  maShipper: string;
+  maNhanVienQuay?: string;
+  tongDonThanhCong: number;
+  tongTienCod: number;
+  tongPhaiNop: number;
+  soTienThucNop?: number;
+  soTienThieu: number;
+  trangThai: string;
+}
+
 export default function CounterPage() {
   const router = useRouter();
   const [user, setUser] = useState<UserSession | null>(null);
-  const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
+  const [step, setStep] = useState<1 | 2 | 3 | 4 | 5>(1);
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
+  const [noticeMsg, setNoticeMsg] = useState("");
 
   // Order form state (empty initial values, user selects or types)
   const [senderPhone, setSenderPhone] = useState("");
@@ -60,12 +80,199 @@ export default function CounterPage() {
     lyDoInLai?: string;
   }[]>([]);
 
+  // UC 6.1 & 6.2: Shipper COD reconciliation state at Counter
+  const [shipperWallets, setShipperWallets] = useState<ShipperWalletItem[]>([]);
+  const [codSlips, setCodSlips] = useState<PhieuDoiSoatItem[]>([]);
+  const [actualCash, setActualCash] = useState<Record<string, number>>({});
+
   async function loadPrintLogs() {
     try {
       const logs = await apiFetch<typeof printLogs>("/don-hang/in-tem/nhat-ky");
       setPrintLogs(logs);
     } catch {
       // ignore
+    }
+  }
+
+  async function loadCodData() {
+    try {
+      const [wallets, slips] = await Promise.all([
+        apiFetch<ShipperWalletItem[]>("/doi-soat/vi-cong-no"),
+        apiFetch<PhieuDoiSoatItem[]>("/doi-soat/shipper"),
+      ]);
+      setShipperWallets(wallets);
+      setCodSlips(slips);
+    } catch {
+      // ignore
+    }
+  }
+
+  async function handleCreateSlipForShipper(w: ShipperWalletItem) {
+    setErrorMsg("");
+    setNoticeMsg("");
+    try {
+      const created = await apiFetch<PhieuDoiSoatItem>("/doi-soat/shipper", {
+        method: "POST",
+        body: JSON.stringify({
+          maShipper: w.maShipper,
+          maNhanVienQuay: user?.maNhanVien || "NV_QUAY_01",
+          tongTienCod: w.tongNoLuyKe,
+          tongCuocMat: 0,
+        }),
+      });
+      await apiFetch(`/doi-soat/shipper/${created.maDoiSoat}/tiep-nhan`, { method: "POST" });
+      await loadCodData();
+      setNoticeMsg(`Đã lập & tiếp nhận phiếu đối soát ${created.maDoiSoat} cho ${w.maShipper}`);
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Không thể lập phiếu đối soát COD");
+    }
+  }
+
+  async function handleReceiveSlip(maDoiSoat: string) {
+    setErrorMsg("");
+    try {
+      const up = await apiFetch<PhieuDoiSoatItem>(`/doi-soat/shipper/${maDoiSoat}/tiep-nhan`, { method: "POST" });
+      setCodSlips((prev) => prev.map((s) => (s.maDoiSoat === maDoiSoat ? up : s)));
+      setNoticeMsg(`Đã tiếp nhận kiểm đếm phiếu ${maDoiSoat}`);
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Lỗi tiếp nhận phiếu");
+    }
+  }
+
+  async function handleReconcileSlip(slip: PhieuDoiSoatItem) {
+    setErrorMsg("");
+    setNoticeMsg("");
+    const val = actualCash[slip.maDoiSoat] ?? slip.tongPhaiNop;
+    try {
+      const up = await apiFetch<PhieuDoiSoatItem>(`/doi-soat/shipper/${slip.maDoiSoat}/doi-soat`, {
+        method: "POST",
+        body: JSON.stringify({
+          soTienThucNop: val,
+          maNhanVienQuay: user?.maNhanVien || "NV_QUAY_01",
+        }),
+      });
+      setCodSlips((prev) => prev.map((s) => (s.maDoiSoat === slip.maDoiSoat ? up : s)));
+      await loadCodData();
+      setNoticeMsg(`Đã khớp lệnh phiếu ${slip.maDoiSoat} — Trạng thái: ${up.trangThai}`);
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Lỗi khớp lệnh đối soát COD");
+    }
+  }
+
+  async function handleCollectDebt(slip: PhieuDoiSoatItem) {
+    setErrorMsg("");
+    setNoticeMsg("");
+    try {
+      const up = await apiFetch<PhieuDoiSoatItem>(`/doi-soat/shipper/${slip.maDoiSoat}/nop-bu-no`, {
+        method: "POST",
+        body: JSON.stringify({ soTienBu: slip.soTienThieu }),
+      });
+      setCodSlips((prev) => prev.map((s) => (s.maDoiSoat === slip.maDoiSoat ? up : s)));
+      await loadCodData();
+      setNoticeMsg(`Đã thu bù đủ công nợ cho phiếu ${slip.maDoiSoat}`);
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Lỗi thu bù nợ");
+    }
+  }
+
+  async function handleLockSlip(maDoiSoat: string) {
+    setErrorMsg("");
+    try {
+      const up = await apiFetch<PhieuDoiSoatItem>(`/doi-soat/shipper/${maDoiSoat}/chot-phieu`, { method: "POST" });
+      setCodSlips((prev) => prev.map((s) => (s.maDoiSoat === maDoiSoat ? up : s)));
+      setNoticeMsg(`Đã chốt khóa sổ phiếu ${maDoiSoat}`);
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Lỗi chốt phiếu");
+    }
+  }
+
+  async function handleUnlockShipper(maShipper: string) {
+    setErrorMsg("");
+    try {
+      await apiFetch(`/doi-soat/mo-khoa/${maShipper}`, { method: "POST" });
+      await loadCodData();
+      setNoticeMsg(`Đã mở khóa quyền nhận đơn cho ${maShipper}`);
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Không thể mở khóa Shipper");
+    }
+  }
+
+  async function handleQuickCollectWallet(w: ShipperWalletItem) {
+    setErrorMsg("");
+    setNoticeMsg("");
+    try {
+      const created = await apiFetch<PhieuDoiSoatItem>("/doi-soat/shipper", {
+        method: "POST",
+        body: JSON.stringify({
+          maShipper: w.maShipper,
+          maNhanVienQuay: user?.maNhanVien || "NV_QUAY_01",
+          tongTienCod: w.tongNoLuyKe,
+          tongCuocMat: 0,
+        }),
+      });
+      await apiFetch(`/doi-soat/shipper/${created.maDoiSoat}/tiep-nhan`, { method: "POST" });
+      await apiFetch(`/doi-soat/shipper/${created.maDoiSoat}/doi-soat`, {
+        method: "POST",
+        body: JSON.stringify({
+          soTienThucNop: w.tongNoLuyKe,
+          maNhanVienQuay: user?.maNhanVien || "NV_QUAY_01",
+        }),
+      });
+      await apiFetch(`/doi-soat/shipper/${created.maDoiSoat}/chot-phieu`, { method: "POST" });
+      await loadCodData();
+      setNoticeMsg(`Đã thu đủ ${formatVnd(w.tongNoLuyKe)} và chốt phiếu ${created.maDoiSoat} cho ${w.maShipper}`);
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Lỗi thu nhanh COD Shipper");
+    }
+  }
+
+  async function handleQuickCollectSlip(slip: PhieuDoiSoatItem) {
+    setErrorMsg("");
+    setNoticeMsg("");
+    try {
+      if (slip.trangThai === "ChoKiemDem") {
+        await apiFetch(`/doi-soat/shipper/${slip.maDoiSoat}/tiep-nhan`, { method: "POST" });
+      }
+      await apiFetch(`/doi-soat/shipper/${slip.maDoiSoat}/doi-soat`, {
+        method: "POST",
+        body: JSON.stringify({
+          soTienThucNop: slip.tongPhaiNop,
+          maNhanVienQuay: user?.maNhanVien || "NV_QUAY_01",
+        }),
+      });
+      await apiFetch(`/doi-soat/shipper/${slip.maDoiSoat}/chot-phieu`, { method: "POST" });
+      await loadCodData();
+      setNoticeMsg(`Đã thu đủ ${formatVnd(slip.tongPhaiNop)} và chốt khóa sổ phiếu ${slip.maDoiSoat}`);
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Lỗi thu đủ & chốt phiếu");
+    }
+  }
+
+  async function autoFillShiftCash() {
+    setErrorMsg("");
+    setCloseMsg("");
+    try {
+      const [slips, allOrders] = await Promise.all([
+        apiFetch<PhieuDoiSoatItem[]>("/doi-soat/shipper"),
+        apiFetch<{ hinhThucThanhToan?: string; nguoiTraCuoc?: string; tongCuoc?: number; trangThai?: string }[]>("/don-hang"),
+      ]);
+      setCodSlips(slips);
+      const totalShipper = slips
+        .filter((s) => s.trangThai === "DaKhopTien" || s.trangThai === "DaThuHoiNo" || s.trangThai === "DaKhoaSo")
+        .reduce((sum, s) => sum + Number(s.soTienThucNop || 0), 0);
+      const totalCounterFee = allOrders
+        .filter((o) => o.hinhThucThanhToan === "TienMat" && o.nguoiTraCuoc === "NguoiGui" && o.trangThai !== "DaHuy")
+        .reduce((sum, o) => sum + Number(o.tongCuoc || 0), 0);
+      setTienCuocQuay(totalCounterFee);
+      setTienShipperNop(totalShipper);
+      setTienThucKiemKe(totalCounterFee + totalShipper);
+    } catch {
+      // fallback to local slips if backend fails
+      const totalShipper = codSlips
+        .filter((s) => s.trangThai === "DaKhopTien" || s.trangThai === "DaThuHoiNo" || s.trangThai === "DaKhoaSo")
+        .reduce((sum, s) => sum + Number(s.soTienThucNop || 0), 0);
+      setTienShipperNop(totalShipper);
+      setTienThucKiemKe(tienCuocQuay + totalShipper);
     }
   }
 
@@ -131,6 +338,7 @@ export default function CounterPage() {
     if (!raw) { router.push("/"); return; }
     setUser(JSON.parse(raw));
     loadPrintLogs();
+    loadCodData();
   }, [router]);
 
   useEffect(() => {
@@ -273,6 +481,9 @@ export default function CounterPage() {
   }
 
   const wards = HCM_DISTRICTS[district] || [];
+  const pendingCodCount =
+    codSlips.filter((s) => s.trangThai !== "DaKhoaSo").length +
+    shipperWallets.filter((w) => Number(w.tongNoLuyKe || 0) > 0).length;
 
   return (
     <div className="min-h-screen flex bg-[#F8FAFC]">
@@ -289,20 +500,34 @@ export default function CounterPage() {
               { id: 1, label: "Lên đơn", icon: FilePlus2 },
               { id: 2, label: "Thu VietQR", icon: QrCode },
               { id: 3, label: "In tem", icon: Printer },
-              { id: 4, label: "Chốt quỹ", icon: Vault },
+              { id: 4, label: "Đối soát COD", icon: Wallet, badge: pendingCodCount },
+              { id: 5, label: "Chốt quỹ", icon: Vault },
             ].map((item) => {
               const Icon = item.icon;
               const active = step === item.id;
               return (
                 <button
                   key={item.id}
-                  onClick={() => { setErrorMsg(""); setStep(item.id as 1 | 2 | 3 | 4); }}
-                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium transition ${
+                  onClick={() => {
+                    setErrorMsg("");
+                    setNoticeMsg("");
+                    setStep(item.id as 1 | 2 | 3 | 4 | 5);
+                    if (item.id === 4) loadCodData();
+                    if (item.id === 5) autoFillShiftCash();
+                  }}
+                  className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl font-medium transition ${
                     active ? "bg-[#FF5722] text-white" : "text-slate-300 hover:bg-slate-800"
                   }`}
                 >
-                  <Icon className="w-4 h-4" />
-                  {item.label}
+                  <span className="flex items-center gap-3">
+                    <Icon className="w-4 h-4" />
+                    {item.label}
+                  </span>
+                  {item.badge ? (
+                    <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${active ? "bg-white/25 text-white" : "bg-[#FF5722] text-white"}`}>
+                      {item.badge}
+                    </span>
+                  ) : null}
                 </button>
               );
             })}
@@ -686,8 +911,228 @@ export default function CounterPage() {
           )}
 
           {step === 4 && (
+            <div className="max-w-5xl mx-auto space-y-5">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-xl font-bold text-[#0F172A]">Đối soát tiền COD &amp; Cước phí với Shipper (UC 6.1 &amp; UC 6.2)</h2>
+                  <p className="text-sm text-slate-500">
+                    Tiếp nhận tiền COD Shipper thu hộ, ghi nợ / khóa tài khoản nếu nộp thiếu, sau đó chuyển tổng tiền thu sang Chốt quỹ ca (UC 6.4).
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={loadCodData}
+                    className="px-3 py-2 border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-xl flex items-center gap-1.5"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" /> Làm mới
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStep(5);
+                      autoFillShiftCash();
+                    }}
+                    className="px-3.5 py-2 bg-[#0F172A] hover:bg-slate-800 text-white text-xs font-semibold rounded-xl"
+                  >
+                    Sang Chốt quỹ ca (UC 6.4) →
+                  </button>
+                </div>
+              </div>
+
+              {noticeMsg && (
+                <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 shrink-0" /> {noticeMsg}
+                </div>
+              )}
+
+              {/* Ví COD hiện tại của các Shipper */}
+              <div className="bg-white rounded-2xl border border-slate-200 p-5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-bold text-sm text-[#0F172A]">Ví COD Shipper đang giữ (Cập nhật ngay khi Shipper giao hàng)</h3>
+                  <span className="text-xs text-slate-400">Hạn mức khóa tự động: 3.000.000đ / 24h</span>
+                </div>
+                {shipperWallets.length === 0 ? (
+                  <div className="text-xs text-slate-400 py-2">Chưa có dữ liệu ví công nợ Shipper.</div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {shipperWallets.map((w) => (
+                      <div key={w.maVi} className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between gap-3">
+                        <div>
+                          <div className="font-bold text-sm text-[#0F172A] flex items-center gap-2">
+                            {w.maShipper}
+                            {w.daKhoaNhanDon ? (
+                              <span className="px-2 py-0.5 rounded-full bg-red-100 text-red-700 text-[10px] font-semibold">Đang bị khóa</span>
+                            ) : (
+                              <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-[10px] font-semibold">Hoạt động</span>
+                            )}
+                          </div>
+                          <div className="text-xs text-slate-500 mt-0.5">
+                            COD đang giữ: <strong className="text-[#FF5722] text-sm">{formatVnd(w.tongNoLuyKe)}</strong>
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap items-center justify-end gap-1.5 shrink-0">
+                          {Number(w.tongNoLuyKe || 0) > 0 && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => handleQuickCollectWallet(w)}
+                                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg"
+                              >
+                                Thu đủ &amp; Chốt nhanh
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleCreateSlipForShipper(w)}
+                                className="px-2.5 py-1.5 bg-[#FF5722] hover:bg-[#E64A19] text-white text-xs font-semibold rounded-lg"
+                              >
+                                Lập phiếu (Nhập tay)
+                              </button>
+                            </>
+                          )}
+                          {w.daKhoaNhanDon && (
+                            <button
+                              type="button"
+                              onClick={() => handleUnlockShipper(w.maShipper)}
+                              className="px-2.5 py-1.5 bg-[#0F172A] text-white text-xs font-semibold rounded-lg flex items-center gap-1"
+                            >
+                              <Unlock className="w-3 h-3" /> Mở khóa
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Bảng Phiếu đối soát COD Shipper */}
+              <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+                <div className="p-4 border-b border-slate-100 font-bold text-sm text-[#0F172A]">
+                  Danh sách Phiếu đối soát COD Shipper ({codSlips.length})
+                </div>
+                {codSlips.length === 0 ? (
+                  <div className="p-8 text-center text-sm text-slate-400">
+                    Chưa có phiếu đối soát nào. Khi Shipper bấm nộp COD hoặc quầy bấm &ldquo;Thu đủ &amp; Chốt nhanh&rdquo;, phiếu sẽ hiện tại đây.
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm text-left">
+                      <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
+                        <tr>
+                          <th className="px-4 py-3">Mã phiếu</th>
+                          <th className="px-4 py-3">Shipper</th>
+                          <th className="px-4 py-3">Phải nộp</th>
+                          <th className="px-4 py-3">Thực nộp (VNĐ)</th>
+                          <th className="px-4 py-3">Còn thiếu</th>
+                          <th className="px-4 py-3">Trạng thái</th>
+                          <th className="px-4 py-3">Thao tác Quầy</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {codSlips.map((s) => (
+                          <tr key={s.maDoiSoat}>
+                            <td className="px-4 py-3 font-semibold font-mono text-xs">{s.maDoiSoat}</td>
+                            <td className="px-4 py-3">{s.maShipper}</td>
+                            <td className="px-4 py-3 font-medium">{formatVnd(s.tongPhaiNop)}</td>
+                            <td className="px-4 py-3">
+                              <input
+                                type="number"
+                                min={0}
+                                disabled={s.trangThai === "DaKhoaSo"}
+                                defaultValue={s.soTienThucNop || s.tongPhaiNop}
+                                onChange={(e) => setActualCash({ ...actualCash, [s.maDoiSoat]: Number(e.target.value) })}
+                                className="w-32 px-2 py-1 border border-slate-300 rounded-lg text-sm disabled:bg-slate-100"
+                              />
+                            </td>
+                            <td className="px-4 py-3 text-red-600 font-semibold">{formatVnd(s.soTienThieu)}</td>
+                            <td className="px-4 py-3">
+                              <span
+                                className={`px-2.5 py-1 rounded-full text-xs font-semibold ${
+                                  s.trangThai === "KhoaTaiKhoanShipper" || s.trangThai === "PhatSinhCongNo"
+                                    ? "bg-red-50 text-red-700"
+                                    : s.trangThai === "ChoKiemDem" || s.trangThai === "DangKiemDem"
+                                    ? "bg-amber-50 text-amber-700"
+                                    : "bg-emerald-50 text-emerald-700"
+                                }`}
+                              >
+                                {s.trangThai}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 flex flex-wrap items-center gap-1.5">
+                              {s.trangThai !== "DaKhoaSo" && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleQuickCollectSlip(s)}
+                                  className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg"
+                                >
+                                  Thu đủ &amp; Chốt nhanh
+                                </button>
+                              )}
+                              {s.trangThai === "ChoKiemDem" && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleReceiveSlip(s.maDoiSoat)}
+                                  className="px-2.5 py-1.5 bg-blue-600 text-white text-xs font-semibold rounded-lg"
+                                >
+                                  Tiếp nhận
+                                </button>
+                              )}
+                              {s.trangThai !== "DaKhoaSo" && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleReconcileSlip(s)}
+                                  className="px-3 py-1.5 bg-[#FF5722] text-white text-xs font-semibold rounded-lg"
+                                >
+                                  Khớp lệnh
+                                </button>
+                              )}
+                              {Number(s.soTienThieu || 0) > 0 && s.trangThai !== "DaKhoaSo" && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleCollectDebt(s)}
+                                  className="px-2.5 py-1.5 bg-amber-600 text-white text-xs font-semibold rounded-lg"
+                                >
+                                  Thu bù nợ
+                                </button>
+                              )}
+                              {s.trangThai !== "DaKhoaSo" && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleLockSlip(s.maDoiSoat)}
+                                  className="px-2.5 py-1.5 bg-slate-900 text-white text-xs font-semibold rounded-lg"
+                                >
+                                  Chốt sổ
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {step === 5 && (
             <form onSubmit={handleCloseCash} className="max-w-2xl mx-auto bg-white p-6 rounded-2xl border border-slate-200 space-y-4">
-              <h2 className="text-xl font-bold">Kiểm kê két tiền &amp; Chốt quỹ ca</h2>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h2 className="text-xl font-bold">Kiểm kê két tiền &amp; Chốt quỹ ca (UC 6.4)</h2>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Số liệu đã tự động tổng hợp từ đơn tiền mặt tại quầy và phiếu COD Shipper đã thu.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={autoFillShiftCash}
+                  className="px-3 py-1.5 border border-slate-300 bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-semibold rounded-lg flex items-center gap-1.5"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" /> Tự động tổng hợp
+                </button>
+              </div>
               <div className="grid grid-cols-3 gap-4">
                 <div>
                   <label className="block text-xs font-medium text-slate-600 mb-1.5">Tiền cước quầy (VNĐ)</label>
@@ -702,9 +1147,16 @@ export default function CounterPage() {
                   <input type="number" min={0} value={tienThucKiemKe || ""} placeholder="0" onChange={(e) => setTienThucKiemKe(Number(e.target.value || 0))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm" />
                 </div>
               </div>
-              <div className="p-4 rounded-xl bg-slate-50 flex justify-between text-sm">
+              <div className="p-4 rounded-xl bg-slate-50 flex flex-wrap items-center justify-between gap-2 text-sm">
                 <span>Tổng sổ sách: <strong>{formatVnd(tienCuocQuay + tienShipperNop)}</strong></span>
-                <span>Chênh lệch: <strong className="text-[#FF5722]">{formatVnd(tienThucKiemKe - (tienCuocQuay + tienShipperNop))}</strong></span>
+                <span>Chênh lệch: <strong className={tienThucKiemKe - (tienCuocQuay + tienShipperNop) === 0 ? "text-emerald-600" : "text-[#FF5722]"}>{formatVnd(tienThucKiemKe - (tienCuocQuay + tienShipperNop))}</strong></span>
+                <button
+                  type="button"
+                  onClick={() => setTienThucKiemKe(tienCuocQuay + tienShipperNop)}
+                  className="px-2.5 py-1 rounded-lg bg-white border border-slate-300 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                >
+                  Khớp đủ sổ sách
+                </button>
               </div>
               {closeMsg && (
                 <div className="p-3 rounded-xl bg-emerald-50 text-emerald-700 text-sm flex items-center gap-2">

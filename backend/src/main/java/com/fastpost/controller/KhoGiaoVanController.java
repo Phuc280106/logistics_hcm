@@ -126,16 +126,16 @@ public class KhoGiaoVanController {
             }
         }
 
-        // UC 4.4 branch 5b: Chặn xuất kho đơn đang TamGiuChoXuLy / DaHuy / DaBoiThuong
+        // UC 4.4 branch 5b: Chỉ cho phép xuất kho đơn đang DaNhapKho hoặc ChoGiaoLai
         for (String code : codes) {
             Optional<DonHang> dhCheck = donHangRepo.findById(code.trim());
             if (dhCheck.isEmpty()) {
                 return ResponseEntity.badRequest().body(Map.of("message", "Không tìm thấy vận đơn: " + code.trim()));
             }
             String st = dhCheck.get().getTrangThai();
-            if ("TamGiuChoXuLy".equals(st) || "DaHuy".equals(st) || "DaBoiThuong".equals(st) || "DaChuyenHoan".equals(st)) {
+            if (!"DaNhapKho".equals(st) && !"ChoGiaoLai".equals(st)) {
                 return ResponseEntity.badRequest().body(Map.of(
-                        "message", "Từ chối xuất kho: Đơn " + code.trim() + " đang ở trạng thái " + st + " (cần xử lý biên bản bất thường trước)"));
+                        "message", "Từ chối xuất kho: Đơn " + code.trim() + " đang ở trạng thái " + st + " (chỉ xuất kho đơn đang DaNhapKho hoặc ChoGiaoLai)"));
             }
         }
 
@@ -184,16 +184,21 @@ public class KhoGiaoVanController {
     @Transactional
     public ResponseEntity<?> shipperConfirmPhieuXuat(@PathVariable String maPhieuXuat) {
         return phieuXuatRepo.findById(maPhieuXuat).map(px -> {
+            if (Boolean.TRUE.equals(px.getShipperDaXacNhan())) {
+                return ResponseEntity.ok(px);
+            }
             px.setShipperDaXacNhan(true);
             phieuXuatRepo.save(px);
 
             List<ChiTietPhieuXuat> items = ctPhieuXuatRepo.findByMaPhieuXuat(maPhieuXuat);
             for (ChiTietPhieuXuat item : items) {
                 donHangRepo.findById(item.getMaVanDon()).ifPresent(dh -> {
-                    dh.setTrangThai("DangGiaoHang");
-                    donHangRepo.save(dh);
-                    addHistory(dh.getMaVanDon(), px.getMaBuuCuc(), px.getMaShipper(), "DangGiaoHang",
-                            "Shipper đã xác nhận nhận hàng từ phiếu xuất " + maPhieuXuat + " và bắt đầu đi giao");
+                    if ("SanSangGiao".equals(dh.getTrangThai())) {
+                        dh.setTrangThai("DangGiaoHang");
+                        donHangRepo.save(dh);
+                        addHistory(dh.getMaVanDon(), px.getMaBuuCuc(), px.getMaShipper(), "DangGiaoHang",
+                                "Shipper đã xác nhận nhận hàng từ phiếu xuất " + maPhieuXuat + " và bắt đầu đi giao");
+                    }
                 });
             }
             return ResponseEntity.ok(px);

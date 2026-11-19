@@ -2,6 +2,7 @@ package com.fastpost.controller;
 
 import com.fastpost.entity.*;
 import com.fastpost.repository.*;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -84,15 +85,59 @@ public class DanhMucController {
 
     @PostMapping("/buu-cuc")
     public ResponseEntity<?> saveBuuCuc(@RequestBody BuuCuc req) {
-        if ("TamNgung".equalsIgnoreCase(req.getTrangThaiHoatDong())) {
-            long tonKho = donHangRepo.countByMaBuuCucHienTaiAndTrangThaiIn(
-                    req.getMaBuuCuc(), List.of("DaNhapKho", "SanSangGiao", "TamGiuChoXuLy", "ChoLuanChuyenHub"));
-            if (tonKho > 0) {
-                return ResponseEntity.badRequest().body(Map.of(
-                        "message", "Không thể tạm ngưng bưu cục đang còn " + tonKho + " kiện hàng tồn kho"));
-            }
+        String blockMsg = validateBuuCucStatus(req.getMaBuuCuc(), req.getTrangThaiHoatDong());
+        if (blockMsg != null) {
+            return ResponseEntity.badRequest().body(Map.of("message", blockMsg));
         }
         return ResponseEntity.ok(buuCucRepo.save(req));
+    }
+
+    @PutMapping("/buu-cuc/{maBuuCuc}")
+    public ResponseEntity<?> updateBuuCuc(@PathVariable String maBuuCuc, @RequestBody BuuCuc req) {
+        return buuCucRepo.findById(maBuuCuc).map(existing -> {
+            String nextStatus = req.getTrangThaiHoatDong() != null ? req.getTrangThaiHoatDong() : existing.getTrangThaiHoatDong();
+            String blockMsg = validateBuuCucStatus(maBuuCuc, nextStatus);
+            if (blockMsg != null) {
+                return ResponseEntity.badRequest().body(Map.of("message", blockMsg));
+            }
+            if (req.getTenBuuCuc() != null && !req.getTenBuuCuc().isBlank()) existing.setTenBuuCuc(req.getTenBuuCuc());
+            if (req.getLoaiKho() != null && !req.getLoaiKho().isBlank()) existing.setLoaiKho(req.getLoaiKho());
+            if (req.getDiaChi() != null && !req.getDiaChi().isBlank()) existing.setDiaChi(req.getDiaChi());
+            if (req.getToaDoGps() != null) existing.setToaDoGps(req.getToaDoGps());
+            existing.setTrangThaiHoatDong(nextStatus);
+            return ResponseEntity.ok(buuCucRepo.save(existing));
+        }).orElse(ResponseEntity.notFound().build());
+    }
+
+    @DeleteMapping("/buu-cuc/{maBuuCuc}")
+    public ResponseEntity<?> deleteBuuCuc(@PathVariable String maBuuCuc) {
+        if (!buuCucRepo.existsById(maBuuCuc)) {
+            return ResponseEntity.notFound().build();
+        }
+        long tonKho = donHangRepo.countByMaBuuCucHienTaiAndTrangThaiIn(
+                maBuuCuc, List.of("DaNhapKho", "SanSangGiao", "TamGiuChoXuLy", "ChoLuanChuyenHub"));
+        if (tonKho > 0) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "message", "Không thể xóa bưu cục đang còn " + tonKho + " kiện hàng tồn kho"));
+        }
+        try {
+            buuCucRepo.deleteById(maBuuCuc);
+            return ResponseEntity.ok(Map.of("deleted", maBuuCuc));
+        } catch (DataIntegrityViolationException ex) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "message", "Không thể xóa bưu cục đang có dữ liệu liên kết (đơn hàng, nhân viên, tuyến hoặc manifest). Hãy chuyển sang Tạm ngưng."));
+        }
+    }
+
+    private String validateBuuCucStatus(String maBuuCuc, String status) {
+        if ("TamNgung".equalsIgnoreCase(status) && maBuuCuc != null) {
+            long tonKho = donHangRepo.countByMaBuuCucHienTaiAndTrangThaiIn(
+                    maBuuCuc, List.of("DaNhapKho", "SanSangGiao", "TamGiuChoXuLy", "ChoLuanChuyenHub"));
+            if (tonKho > 0) {
+                return "Không thể tạm ngưng bưu cục đang còn " + tonKho + " kiện hàng tồn kho";
+            }
+        }
+        return null;
     }
 
     @GetMapping("/tuyen-giao-hang")

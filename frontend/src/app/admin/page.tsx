@@ -129,11 +129,13 @@ export default function AdminPage() {
   const [newBcName, setNewBcName] = useState("");
   const [newBcAddr, setNewBcAddr] = useState("");
   const [newBcType, setNewBcType] = useState("BuuCuc");
+  const [newBcStatus, setNewBcStatus] = useState("Active");
+  const [editingBc, setEditingBc] = useState<string | null>(null);
   const [newGdvId, setNewGdvId] = useState("");
   const [newGdvName, setNewGdvName] = useState("");
 
   // 1. Warehouse & Manifest state
-  const [buuCucList, setBuuCucList] = useState<{ maBuuCuc: string; tenBuuCuc: string; loaiKho: string }[]>([]);
+  const [buuCucList, setBuuCucList] = useState<{ maBuuCuc: string; tenBuuCuc: string; loaiKho: string; diaChi?: string; trangThaiHoatDong?: string }[]>([]);
   const [khoDi, setKhoDi] = useState("KHO_Q1");
   const [khoDen, setKhoDen] = useState("BC_BENNGHE");
   const [donChoKho, setDonChoKho] = useState<{ maVanDon: string; nguoiNhanTen: string; quanHuyenGiao: string; phuongXaGiao: string }[]>([]);
@@ -163,7 +165,20 @@ export default function AdminPage() {
   const [returnOrders, setReturnOrders] = useState<{ maVanDon: string; nguoiNhanTen: string; soLanGiaoThatBai: number; trangThai: string }[]>([]);
 
   // 3. Finance & SLA
-  const [financeTab, setFinanceTab] = useState<"shipper" | "shop" | "pricing">("shipper");
+  const [financeTab, setFinanceTab] = useState<"chotquy" | "shipper" | "shop" | "pricing">("chotquy");
+  const [chotQuyList, setChotQuyList] = useState<{
+    maBienBanQuy: string;
+    maBuuCuc: string;
+    maNhanVienQuayLap: string;
+    ngayChot?: string;
+    tienCuocQuay: number;
+    tienShipperNop: number;
+    tongTienSoSach: number;
+    tienThucKiemKe: number;
+    chenhLech: number;
+    lyDoChenhLech?: string;
+    daKhoaSo?: boolean;
+  }[]>([]);
   const [slips, setSlips] = useState<PhieuDoiSoatItem[]>([]);
   const [actualCash, setActualCash] = useState<Record<string, number>>({});
   const [kyList, setKyList] = useState<{ maKy: string; loaiKyThanhToan: string; trangThai: string }[]>([]);
@@ -191,6 +206,7 @@ export default function AdminPage() {
     apiFetch<{ tieuTuyenList: TieuTuyenItem[] }>("/kho/tuyen").then((d) => setSubRoutes(d.tieuTuyenList || [])).catch(() => {});
     apiFetch<{ maVanDon: string; nguoiNhanTen: string; soLanGiaoThatBai: number; trangThai: string }[]>("/don-hang?status=ChoChuyenHoan").then(setReturnOrders).catch(() => {});
     apiFetch<PhieuDoiSoatItem[]>("/doi-soat/shipper").then(setSlips).catch(() => {});
+    apiFetch<typeof chotQuyList>("/doi-soat/chot-quy").then(setChotQuyList).catch(() => {});
     apiFetch<{ maKy: string; loaiKyThanhToan: string; trangThai: string }[]>("/tai-chinh/ky-quyet-toan").then((kys) => {
       setKyList(kys);
       if (kys.length > 0) {
@@ -912,20 +928,105 @@ export default function AdminPage() {
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <div>
                   <h1 className="text-2xl font-bold">Tài chính, Đối soát &amp; Bảng giá</h1>
-                  <p className="text-sm text-slate-500">Đối soát COD Shipper, quyết toán COD cho Shop và cấu hình bảng giá động.</p>
+                  <p className="text-sm text-slate-500">Quản lý bưu cục: Kiểm duyệt chốt quỹ ca từ Quầy (UC 6.4), quyết toán COD Shop (UC 6.3) &amp; giám sát đối soát Shipper.</p>
                 </div>
-                <div className="flex bg-slate-200/70 p-1 rounded-xl text-xs font-semibold">
-                  <button onClick={() => setFinanceTab("shipper")} className={`px-3 py-2 rounded-lg ${financeTab === "shipper" ? "bg-[#FF5722] text-white" : "text-slate-600"}`}>Đối soát Shipper</button>
-                  <button onClick={() => setFinanceTab("shop")} className={`px-3 py-2 rounded-lg ${financeTab === "shop" ? "bg-[#FF5722] text-white" : "text-slate-600"}`}>Quyết toán Shop</button>
-                  <button onClick={() => setFinanceTab("pricing")} className={`px-3 py-2 rounded-lg ${financeTab === "pricing" ? "bg-[#FF5722] text-white" : "text-slate-600"}`}>Bảng giá &amp; Tham số</button>
+                <div className="flex flex-wrap bg-slate-200/70 p-1 rounded-xl text-xs font-semibold gap-1">
+                  <button
+                    onClick={() => {
+                      setFinanceTab("chotquy");
+                      apiFetch<typeof chotQuyList>("/doi-soat/chot-quy").then(setChotQuyList).catch(() => {});
+                    }}
+                    className={`px-3 py-2 rounded-lg ${financeTab === "chotquy" ? "bg-[#FF5722] text-white" : "text-slate-600"}`}
+                  >
+                    Chốt quỹ Quầy ({chotQuyList.length})
+                  </button>
+                  <button onClick={() => setFinanceTab("shop")} className={`px-3 py-2 rounded-lg ${financeTab === "shop" ? "bg-[#FF5722] text-white" : "text-slate-600"}`}>
+                    Quyết toán Shop
+                  </button>
+                  <button
+                    onClick={() => {
+                      setFinanceTab("shipper");
+                      apiFetch<PhieuDoiSoatItem[]>("/doi-soat/shipper").then(setSlips).catch(() => {});
+                    }}
+                    className={`px-3 py-2 rounded-lg ${financeTab === "shipper" ? "bg-[#FF5722] text-white" : "text-slate-600"}`}
+                  >
+                    Giám sát COD Shipper
+                  </button>
+                  <button onClick={() => setFinanceTab("pricing")} className={`px-3 py-2 rounded-lg ${financeTab === "pricing" ? "bg-[#FF5722] text-white" : "text-slate-600"}`}>
+                    Bảng giá &amp; Tham số
+                  </button>
                 </div>
               </div>
+
+              {financeTab === "chotquy" && (
+                <div className="space-y-4">
+                  <div className="bg-white p-4 rounded-2xl border border-slate-200 flex flex-wrap items-center justify-between gap-3">
+                    <div className="text-xs text-slate-600">
+                      <strong>Luồng UC 6.1 → UC 6.4 → UC 6.3:</strong> Shipper nộp tiền COD tại Quầy (<code>/counter</code>) → Nhân viên quầy kiểm đếm &amp; lập Biên bản chốt quỹ ca → Quản lý bưu cục kiểm duyệt tại đây rồi Quyết toán trả COD cho Shop.
+                    </div>
+                    <button
+                      onClick={() => apiFetch<typeof chotQuyList>("/doi-soat/chot-quy").then(setChotQuyList).catch(() => {})}
+                      className="px-3 py-1.5 bg-slate-900 text-white text-xs font-semibold rounded-lg shrink-0"
+                    >
+                      Tải mới biên bản
+                    </button>
+                  </div>
+
+                  <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+                    {chotQuyList.length === 0 ? (
+                      <div className="p-8 text-center text-sm text-slate-400">
+                        Chưa có biên bản chốt quỹ ca nào từ Quầy giao dịch (<code>/counter</code>).
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm text-left">
+                          <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
+                            <tr>
+                              <th className="px-4 py-3">Mã biên bản</th>
+                              <th className="px-4 py-3">Bưu cục / NV Quầy</th>
+                              <th className="px-4 py-3">Cước quầy</th>
+                              <th className="px-4 py-3">Shipper nộp COD</th>
+                              <th className="px-4 py-3">Tổng sổ sách</th>
+                              <th className="px-4 py-3">Thực kiểm kê</th>
+                              <th className="px-4 py-3">Chênh lệch</th>
+                              <th className="px-4 py-3">Trạng thái</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {chotQuyList.map((bb) => (
+                              <tr key={bb.maBienBanQuy}>
+                                <td className="px-4 py-3 font-mono text-xs font-semibold">{bb.maBienBanQuy}</td>
+                                <td className="px-4 py-3 text-xs">
+                                  <div className="font-semibold text-[#0F172A]">{bb.maBuuCuc}</div>
+                                  <div className="text-slate-500">{bb.maNhanVienQuayLap}</div>
+                                </td>
+                                <td className="px-4 py-3">{formatVnd(bb.tienCuocQuay)}</td>
+                                <td className="px-4 py-3 font-semibold text-[#FF5722]">{formatVnd(bb.tienShipperNop)}</td>
+                                <td className="px-4 py-3 font-medium">{formatVnd(bb.tongTienSoSach)}</td>
+                                <td className="px-4 py-3 font-bold text-[#0F172A]">{formatVnd(bb.tienThucKiemKe)}</td>
+                                <td className={`px-4 py-3 font-semibold ${Number(bb.chenhLech || 0) !== 0 ? "text-red-600" : "text-emerald-600"}`}>
+                                  {formatVnd(bb.chenhLech)}
+                                </td>
+                                <td className="px-4 py-3">
+                                  <span className="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs font-semibold">
+                                    {bb.daKhoaSo ? "Đã khóa sổ ca" : "Đang mở"}
+                                  </span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {financeTab === "shipper" && (
                 <div className="space-y-4">
                   <div className="bg-white p-4 rounded-2xl border border-slate-200 flex flex-wrap items-center justify-between gap-3">
                     <div className="text-xs text-slate-600">
-                      Kiểm đếm tiền mặt COD cuối ca, ghi nợ hoặc mở khóa quyền nhận đơn cho Shipper sau khi tất toán (UC 6.1, UC 6.2).
+                      Nghiệp vụ kiểm đếm COD Shipper (UC 6.1 &amp; UC 6.2) thực hiện tại màn hình <strong>Nhân viên quầy (<code>/counter</code> → Đối soát COD)</strong>. Quản lý bưu cục giám sát lịch sử phiếu &amp; hỗ trợ mở khóa tại đây.
                     </div>
                     <button
                       onClick={async () => {
@@ -1590,12 +1691,54 @@ export default function AdminPage() {
                   <h2 className="font-bold text-base">Bưu cục &amp; Kho ({buuCucList.length})</h2>
                   <div className="space-y-2 max-h-56 overflow-y-auto text-xs">
                     {buuCucList.map((b) => (
-                      <div key={b.maBuuCuc} className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between">
-                        <div>
-                          <div className="font-semibold text-[#0F172A]">{b.tenBuuCuc}</div>
-                          <div className="text-slate-500">{b.maBuuCuc}</div>
+                      <div key={b.maBuuCuc} className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="font-semibold text-[#0F172A] truncate">{b.tenBuuCuc}</div>
+                          <div className="text-slate-500 truncate">
+                            {b.maBuuCuc} · {b.trangThaiHoatDong === "TamNgung" ? "Tạm ngưng" : "Hoạt động"}
+                          </div>
                         </div>
-                        <span className="px-2 py-0.5 rounded-full bg-orange-50 text-[#FF5722] font-semibold">{b.loaiKho}</span>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <span className="px-2 py-0.5 rounded-full bg-orange-50 text-[#FF5722] font-semibold">{b.loaiKho}</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingBc(b.maBuuCuc);
+                              setNewBcId(b.maBuuCuc);
+                              setNewBcName(b.tenBuuCuc);
+                              setNewBcType(b.loaiKho || "BuuCuc");
+                              setNewBcAddr(b.diaChi || "");
+                              setNewBcStatus(b.trangThaiHoatDong || "Active");
+                            }}
+                            className="px-2 py-0.5 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-800 font-semibold"
+                          >
+                            Sửa
+                          </button>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              if (!confirm(`Xóa bưu cục ${b.maBuuCuc}?`)) return;
+                              setErrorMsg("");
+                              try {
+                                await apiFetch(`/danh-muc/buu-cuc/${b.maBuuCuc}`, { method: "DELETE" });
+                                const list = await apiFetch<typeof buuCucList>("/danh-muc/buu-cuc");
+                                setBuuCucList(list);
+                                if (editingBc === b.maBuuCuc) {
+                                  setEditingBc(null);
+                                  setNewBcId("");
+                                  setNewBcName("");
+                                  setNewBcAddr("");
+                                }
+                                setNotice(`Đã xóa bưu cục ${b.maBuuCuc}`);
+                              } catch (err) {
+                                setErrorMsg(err instanceof Error ? err.message : "Không thể xóa bưu cục");
+                              }
+                            }}
+                            className="px-2 py-0.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-700 font-semibold"
+                          >
+                            Xóa
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -1604,40 +1747,73 @@ export default function AdminPage() {
                       e.preventDefault();
                       setErrorMsg("");
                       try {
-                        await apiFetch("/danh-muc/buu-cuc", {
-                          method: "POST",
+                        const targetId = editingBc || newBcId;
+                        await apiFetch(editingBc ? `/danh-muc/buu-cuc/${editingBc}` : "/danh-muc/buu-cuc", {
+                          method: editingBc ? "PUT" : "POST",
                           body: JSON.stringify({
-                            maBuuCuc: newBcId,
+                            maBuuCuc: targetId,
                             tenBuuCuc: newBcName,
                             loaiKho: newBcType,
                             diaChi: newBcAddr,
                             soDuQuyKet: 0,
-                            trangThaiHoatDong: "HoatDong",
+                            trangThaiHoatDong: newBcStatus,
                           }),
                         });
                         const list = await apiFetch<typeof buuCucList>("/danh-muc/buu-cuc");
                         setBuuCucList(list);
+                        setEditingBc(null);
                         setNewBcId("");
                         setNewBcName("");
                         setNewBcAddr("");
-                        setNotice(`Đã lưu bưu cục ${newBcId}`);
+                        setNewBcStatus("Active");
+                        setNotice(editingBc ? `Đã cập nhật bưu cục ${targetId}` : `Đã lưu bưu cục ${targetId}`);
                       } catch (err) {
                         setErrorMsg(err instanceof Error ? err.message : "Lỗi lưu bưu cục");
                       }
                     }}
                     className="pt-3 border-t border-slate-100 space-y-2"
                   >
-                    <div className="grid grid-cols-3 gap-2">
-                      <input value={newBcId} onChange={(e) => setNewBcId(e.target.value)} placeholder="Mã BC (VD: BC_Q3)" className="px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs" required />
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      <input
+                        value={newBcId}
+                        onChange={(e) => setNewBcId(e.target.value)}
+                        disabled={Boolean(editingBc)}
+                        placeholder="Mã BC (VD: BC_Q3)"
+                        className="px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs disabled:bg-slate-100"
+                        required
+                      />
                       <input value={newBcName} onChange={(e) => setNewBcName(e.target.value)} placeholder="Tên bưu cục" className="px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs" required />
                       <select value={newBcType} onChange={(e) => setNewBcType(e.target.value)} className="px-2 py-1.5 border border-slate-300 rounded-lg text-xs bg-white">
+                        <option value="BuuCucPhat">Bưu cục phát</option>
+                        <option value="KhoTrungChuyen">Kho trung chuyển</option>
                         <option value="BuuCuc">Bưu cục</option>
                         <option value="KhoTong">Kho tổng</option>
+                      </select>
+                      <select value={newBcStatus} onChange={(e) => setNewBcStatus(e.target.value)} className="px-2 py-1.5 border border-slate-300 rounded-lg text-xs bg-white">
+                        <option value="Active">Hoạt động</option>
+                        <option value="TamNgung">Tạm ngưng</option>
                       </select>
                     </div>
                     <div className="flex gap-2">
                       <input value={newBcAddr} onChange={(e) => setNewBcAddr(e.target.value)} placeholder="Địa chỉ..." className="flex-1 px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs" required />
-                      <button type="submit" className="px-3 py-1.5 bg-[#0F172A] text-white rounded-lg text-xs font-semibold">Lưu</button>
+                      {editingBc && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingBc(null);
+                            setNewBcId("");
+                            setNewBcName("");
+                            setNewBcAddr("");
+                            setNewBcStatus("Active");
+                          }}
+                          className="px-3 py-1.5 border border-slate-300 text-slate-600 rounded-lg text-xs font-semibold"
+                        >
+                          Hủy
+                        </button>
+                      )}
+                      <button type="submit" className="px-3 py-1.5 bg-[#0F172A] text-white rounded-lg text-xs font-semibold">
+                        {editingBc ? "Cập nhật" : "Lưu"}
+                      </button>
                     </div>
                   </form>
                 </div>
